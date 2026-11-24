@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
   RunEvent,
   RunnerKind,
@@ -256,7 +256,8 @@ export class Runner implements TestRunnerAdapter {
         args = [
           "--test",
           "--test-reporter",
-          join(root, "server/reporters/node.mjs"),
+          // Node imports custom reporters as ESM; Windows drive paths need a file URL.
+          pathToFileURL(join(root, "server/reporters/node.mjs")).href,
           ...(item.name
             ? ["--test-name-pattern", `^${escapeRegex(item.name)}$`]
             : []),
