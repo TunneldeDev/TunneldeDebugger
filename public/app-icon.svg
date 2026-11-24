@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="portal" x1="230" y1="178" x2="792" y2="840" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8DE8FF"/>
+      <stop offset=".42" stop-color="#5BA6FF"/>
+      <stop offset="1" stop-color="#5968EE"/>
+    </linearGradient>
+    <linearGradient id="prompt" x1="352" y1="437" x2="664" y2="663" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E6FAFF"/>
+      <stop offset="1" stop-color="#A2CAFF"/>
+    </linearGradient>
+  </defs>
+  <!-- Open tunnel: the aperture and space below the prompt stay transparent. -->
+  <path d="M176 828V438C176 252.4 326.4 102 512 102S848 252.4 848 438V828C848 849 831 866 810 866H762C741 866 724 849 724 828V438C724 320.9 629.1 226 512 226S300 320.9 300 438V828C300 849 283 866 262 866H214C193 866 176 849 176 828Z" fill="url(#portal)"/>
+  <!-- A terminal prompt, drawn as two independent strokes inside the opening. -->
+  <path d="M388 440L486 528L388 616M544 634H650" stroke="url(#prompt)" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -28,9 +28,11 @@ Use `pnpm dev --target /absolute/checkout --data /absolute/local-data --port 476
 - **Scenarios**: 43 built-in surface entries, including 14 settings sections. Applicable presets, deterministic seeds, theme, language and viewport are independent parameters. The iframe uses production components with isolated styles, focus and in-memory storage.
 - **Tests**: discover Vitest, Rust, Node, Playwright and native tasks; expand files/cases, run selections or all discovered tests, inspect output, duration, failures and cancellation. Node dynamic cases join the tree after execution. Initial Rust discovery compiles test binaries.
 - **Desktop instances**: start an isolated Tunnelde in UI simulation or real-service mode. Real-service checks cover hosts, settings, file editing and controlled SSH/SFTP, including moving production panels into native windows and back.
-- **Acceptance**: record checklist items, pending/passed/failed/blocked conclusions, notes and screenshots, then export JSON. Automated smoke results and manual conclusions are stored separately.
+- **Acceptance**: save issue titles, descriptions, steps, expected results and conclusions; capture the current scene or upload, paste and annotate images. Drafts survive navigation and reload. Search, edit, move history to Trash or restore it and export saved records as JSON. Automated checks and manual conclusions remain separate.
 
 Native mock switching recreates the document. Real-service resets create a new profile. Manual native operations report an ownership error while a queued native test owns the instance.
+
+The preview defaults to **Fit to window**. Use **− / percentage / +** above it to zoom, or choose **100%** for actual pixels. Toggle the sidebars from the scene heading; the desktop window fits the current monitor’s work area on startup.
 
 ## Verify
 

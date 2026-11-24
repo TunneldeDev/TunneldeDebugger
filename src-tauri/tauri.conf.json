@@ -11,11 +11,12 @@
     "windows": [
       {
         "label": "main",
-        "title": "TunneldeDebugger \u00b7 \u5f00\u53d1\u4e0e\u9a8c\u6536",
-        "width": 1560,
-        "height": 1000,
-        "minWidth": 900,
-        "minHeight": 600
+        "title": "TunneldeDebugger · 开发与验收",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 480,
+        "visible": false
       }
     ],
     "security": {
@@ -25,6 +26,13 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": false,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }

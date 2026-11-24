@@ -1,3 +1,4 @@
+import type { ACCEPTANCE_RESULTS, ACCEPTANCE_PRIORITIES } from "./acceptance";
 export const PROTOCOL_VERSION = 1 as const;
 export type TargetKind = "browser" | "native-mock" | "native-service";
 export type Preset =
@@ -106,12 +107,17 @@ export interface TestRunnerAdapter {
   ): Promise<RunStatus>;
 }
 export interface AcceptanceRecord {
+  deletedAt?: string;
+  title?: string;
+  steps?: string;
+  expected?: string;
   id: string;
   scenarioId: string;
   target: TargetKind;
   parameters: ScenarioParameters;
   source: SourceIdentity;
-  status: "pending" | "passed" | "failed" | "blocked";
+  status: keyof typeof ACCEPTANCE_RESULTS;
+  priority?: keyof typeof ACCEPTANCE_PRIORITIES;
   note: string;
   screenshots: string[];
   checklist?: string[];
@@ -144,6 +150,8 @@ export type FrameMessage = {
   | { type: "ready"; scenarioId: string }
   | { type: "error"; message: string }
   | { type: "diagnostic"; message: string }
+  | { type: "capture"; requestId: string }
+  | { type: "captured"; requestId: string; image?: string; error?: string }
   | { type: "snapshot" }
   | { type: "state"; snapshot: unknown }
 );
