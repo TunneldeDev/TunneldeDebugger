@@ -1,0 +1,2838 @@
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index ca3d7553..c69c6a22 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -9,6 +9,10 @@ edition = "2021"
+ default-run = "tunnelde"
+ rust-version = "1.82"
+ 
++[features]
++default = []
++debugger = []
++
+ [lib]
+ name = "tunnelde_lib"
+ # The desktop executable links the Rust library directly; no C/mobile library is shipped.
+diff --git a/src-tauri/src/automation/contract.rs b/src-tauri/src/automation/contract.rs
+index eca0eb8c..6c1d9176 100644
+--- a/src-tauri/src/automation/contract.rs
++++ b/src-tauri/src/automation/contract.rs
+@@ -190,7 +190,7 @@ pub(super) fn validate(request: &Request, token: &str) -> Result<(), Failure> {
+     Ok(())
+ }
+ 
+-fn equal(left: &str, right: &str) -> bool {
++pub(crate) fn equal(left: &str, right: &str) -> bool {
+     left.bytes()
+         .zip(right.bytes())
+         .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+diff --git a/src-tauri/src/automation/transport/listener.rs b/src-tauri/src/automation/transport/listener.rs
+index 3183c1a2..6d239be2 100644
+--- a/src-tauri/src/automation/transport/listener.rs
++++ b/src-tauri/src/automation/transport/listener.rs
+@@ -7,7 +7,7 @@ use tokio::{
+ 
+ const MAX_CONNECTIONS: usize = 8;
+ 
+-pub(super) async fn serve<F, W>(
++pub(crate) async fn serve<F, W>(
+     listener: TcpListener,
+     mut shutdown: watch::Receiver<bool>,
+     connection: F,
+diff --git a/src-tauri/src/automation/transport/mod.rs b/src-tauri/src/automation/transport/mod.rs
+index 13724f2c..825fa98b 100644
+--- a/src-tauri/src/automation/transport/mod.rs
++++ b/src-tauri/src/automation/transport/mod.rs
+@@ -1,6 +1,8 @@
+ //! One bounded JSON request per authenticated loopback connection.
+ mod lifecycle;
+-mod listener;
++pub(crate) mod listener;
++#[cfg(all(feature = "debugger", debug_assertions))]
++pub(crate) use super::contract::equal;
+ mod location;
+ use super::{contract::*, domains};
+ pub(crate) use lifecycle::Lifecycle;
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 7978ca82..7747378f 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -19,6 +19,8 @@ mod state;
+ mod storage;
+ mod update;
+ mod vault;
++#[cfg(all(feature = "debugger", debug_assertions))]
++mod debugger;
+ 
+ pub fn run() {
+     use platform::{menu, tray, window};
+@@ -144,6 +146,8 @@ pub fn run() {
+             state::init(&handle).inspect_err(|error| {
+                 diagnostics::failure::native("startup", "state.initialize", error);
+             })?;
++            #[cfg(all(feature = "debugger", debug_assertions))]
++            debugger::start(&handle)?;
+             platform::panel_windows::native::start(&handle);
+             services::forwarding::automation::start(&handle);
+             services::proxy::start_auto(&handle);
+@@ -176,6 +180,14 @@ pub fn run() {
+             Ok(())
+         })
+         .invoke_handler(platform::ipc_authority::guard(tauri::generate_handler![
++            #[cfg(all(feature = "debugger", debug_assertions))]
++            debugger::debugger_context,
++            #[cfg(all(feature = "debugger", debug_assertions))]
++            debugger::debugger_poll,
++            #[cfg(all(feature = "debugger", debug_assertions))]
++            debugger::debugger_ack,
++            #[cfg(all(feature = "debugger", debug_assertions))]
++            debugger::debugger_result,
+             fonts::fonts_catalogue,
+             fonts::fonts_import,
+             fonts::fonts_finish_import,
+@@ -461,6 +473,8 @@ pub fn run() {
+                 window::show_main(app);
+             }
+             if matches!(event, tauri::RunEvent::Exit) {
++                #[cfg(all(feature = "debugger", debug_assertions))]
++                debugger::stop(app);
+                 automation::transport::stop(app);
+                 use tauri::Manager;
+                 if let Some(state) = app.try_state::<state::AppState>() {
+diff --git a/src/features/forwarding/data/groups.ts b/src/features/forwarding/data/groups.ts
+index 23680777..5810cdf3 100644
+--- a/src/features/forwarding/data/groups.ts
++++ b/src/features/forwarding/data/groups.ts
+@@ -1,7 +1,7 @@
+ import { useForwardingReadModel, ignoreForwardingSubscription } from "./readScope";
+ import { diagnosticInvoke as invoke } from "@/lib/api/diagnosticInvoke";
+ import { useSyncExternalStore } from "react";
+-import { isTauri } from "@/lib/api/ipc";
++import { hasNativeServices } from "@/lib/api/ipc";
+ import { createRetainedListStore } from "@/lib/data/retainedListStore";
+ import { domainEvents } from "@/lib/events/domain";
+ import type { ForwardGroup } from "../model/contract";
+@@ -9,7 +9,8 @@ import type { ForwardGroup } from "../model/contract";
+ /** Same owner across host details and the global panel. Empty groups are data,
+  * not inferred from forwarding rules; callers select their host explicitly. */
+ export const forwardingGroupsStore = createRetainedListStore(
+-  () => (isTauri() ? invoke<ForwardGroup[]>("forwarding_groups_list") : Promise.resolve([])),
++  () =>
++    hasNativeServices() ? invoke<ForwardGroup[]>("forwarding_groups_list") : Promise.resolve([]),
+   (refresh) => {
+     const lifetime = new AbortController();
+     void domainEvents.onForwards(refresh, lifetime.signal);
+diff --git a/src/features/forwarding/data/proxy.ts b/src/features/forwarding/data/proxy.ts
+index b9fb1168..6c58caa9 100644
+--- a/src/features/forwarding/data/proxy.ts
++++ b/src/features/forwarding/data/proxy.ts
+@@ -1,5 +1,5 @@
+ import { diagnosticInvoke as invoke } from "@/lib/api/diagnosticInvoke";
+-import { isTauri } from "@/lib/api/ipc";
++import { hasNativeServices } from "@/lib/api/ipc";
+ import type {
+   ProxyConnection,
+   ProxyGroup,
+@@ -11,24 +11,29 @@ import type {
+ const empty = <T>(): Promise<T[]> => Promise.resolve([]);
+ export const proxyApi = Object.freeze({
+   groups: (hostId: string) =>
+-    isTauri() ? invoke<ProxyGroup[]>("proxy_groups_list", { hostId }) : empty<ProxyGroup>(),
++    hasNativeServices()
++      ? invoke<ProxyGroup[]>("proxy_groups_list", { hostId })
++      : empty<ProxyGroup>(),
+   saveGroup: (group: ProxyGroupInput, expectedRevision?: string) =>
+     invoke<ProxyGroup>("proxy_group_save", { group, expectedRevision }),
+   removeGroup: (id: string, expectedRevision: string) =>
+     invoke<void>("proxy_group_remove", { id, expectedRevision }),
+   routes: (groupId: string) =>
+-    isTauri() ? invoke<ProxyRoute[]>("proxy_routes_list", { groupId }) : empty<ProxyRoute>(),
++    hasNativeServices()
++      ? invoke<ProxyRoute[]>("proxy_routes_list", { groupId })
++      : empty<ProxyRoute>(),
+   saveRoute: (route: Omit<ProxyRoute, "revision">, expectedRevision?: string) =>
+     invoke<ProxyRoute>("proxy_route_save", { route, expectedRevision }),
+   removeRoute: (id: string, expectedRevision: string) =>
+     invoke<void>("proxy_route_remove", { id, expectedRevision }),
+-  runtime: () => (isTauri() ? invoke<ProxyRuntime[]>("proxy_runtime_list") : empty<ProxyRuntime>()),
++  runtime: () =>
++    hasNativeServices() ? invoke<ProxyRuntime[]>("proxy_runtime_list") : empty<ProxyRuntime>(),
+   start: (groupId: string, expectedRevision: string) =>
+     invoke<ProxyRuntime>("proxy_runtime_start", { groupId, expectedRevision }),
+   stop: (groupId: string, expectedRevision: string, runtimeId?: string | null) =>
+     invoke<void>("proxy_runtime_stop", { groupId, expectedRevision, runtimeId }),
+   connections: (groupId: string) =>
+-    isTauri()
++    hasNativeServices()
+       ? invoke<ProxyConnection[]>("proxy_connections_list", { groupId })
+       : empty<ProxyConnection>(),
+   closeConnection: (id: string) => invoke<void>("proxy_connection_close", { id }),
+diff --git a/src/features/forwarding/data/store.ts b/src/features/forwarding/data/store.ts
+index 87648477..5ac33bd9 100644
+--- a/src/features/forwarding/data/store.ts
++++ b/src/features/forwarding/data/store.ts
+@@ -1,7 +1,7 @@
+ import { useForwardingReadModel, ignoreForwardingSubscription } from "./readScope";
+ import { diagnosticInvoke as invoke } from "@/lib/api/diagnosticInvoke";
+ import { useSyncExternalStore } from "react";
+-import { isTauri } from "@/lib/api/ipc";
++import { hasNativeServices } from "@/lib/api/ipc";
+ import { createRetainedListStore } from "@/lib/data/retainedListStore";
+ import { domainEvents } from "@/lib/events/domain";
+ import { useSsh } from "@/store/ssh";
+@@ -24,7 +24,7 @@ export function createForwardingStore(
+   });
+ }
+ export const forwardingStore = createForwardingStore(
+-  () => (isTauri() ? invoke<ForwardInfo[]>("forwarding_list") : Promise.resolve([])),
++  () => (hasNativeServices() ? invoke<ForwardInfo[]>("forwarding_list") : Promise.resolve([])),
+   (refresh) => {
+     const lifetime = new AbortController();
+     void domainEvents.onForwards(refresh, lifetime.signal);
+diff --git a/src/lib/api/diagnosticInvoke.ts b/src/lib/api/diagnosticInvoke.ts
+index 735d96db..fa601e10 100644
+--- a/src/lib/api/diagnosticInvoke.ts
++++ b/src/lib/api/diagnosticInvoke.ts
+@@ -120,6 +120,14 @@ export async function diagnosticInvoke<T>(
+   command: string,
+   ...options: Parameters<typeof invoke> extends [string, ...infer P] ? P : never
+ ): Promise<T> {
++  if (
++    import.meta.env.DEV &&
++    import.meta.env.VITE_TUNNELDE_DEBUGGER === "1" &&
++    window.__TUNNELDE_DEBUGGER_MOCK__
++  ) {
++    const { invokeFixture } = await import("@/debugger/mock");
++    return invokeFixture<T>(command, options[0] as Record<string, unknown> | undefined);
++  }
+   const sampler = sampled.get(command);
+   const started = performance.now();
+   try {
+diff --git a/src/lib/api/ipc.ts b/src/lib/api/ipc.ts
+index 4f6ad77d..b94f6d0d 100644
+--- a/src/lib/api/ipc.ts
++++ b/src/lib/api/ipc.ts
+@@ -68,7 +68,19 @@ import type {
+ } from "./types";
+ 
+ export const isTauri = (): boolean =>
+-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
++  typeof window !== "undefined" &&
++  "__TAURI_INTERNALS__" in window &&
++  !(
++    import.meta.env.DEV &&
++    import.meta.env.VITE_TUNNELDE_DEBUGGER === "1" &&
++    window.__TUNNELDE_DEBUGGER_MOCK__
++  );
++
++export const hasNativeServices = () =>
++  isTauri() ||
++  (import.meta.env.DEV &&
++    import.meta.env.VITE_TUNNELDE_DEBUGGER === "1" &&
++    window.__TUNNELDE_DEBUGGER_MOCK__ === true);
+ 
+ export interface LogSnapshot {
+   diagnostic: string;
+diff --git a/src/lib/events/native.ts b/src/lib/events/native.ts
+index f1a4ddd6..a0bd2d07 100644
+--- a/src/lib/events/native.ts
++++ b/src/lib/events/native.ts
+@@ -61,7 +61,18 @@ export interface NativeEvents {
+ }
+ 
+ export const nativeEvents = createEventBus<NativeEvents>(
+-  (name, receive) => listen(name, ({ payload }) => receive(payload)),
++  (name, receive) => {
++    if (
++      import.meta.env.DEV &&
++      import.meta.env.VITE_TUNNELDE_DEBUGGER === "1" &&
++      window.__TUNNELDE_DEBUGGER_MOCK__
++    ) {
++      return import("@/debugger/mock").then(({ listenFixture }) =>
++        listenFixture(name, receive as (payload: unknown) => void),
++      );
++    }
++    return listen(name, ({ payload }) => receive(payload));
++  },
+   (name, error) => reportError("events.native", name, error),
+ );
+ 
+diff --git a/src/main.tsx b/src/main.tsx
+index bcadbc8c..a33ad50f 100644
+--- a/src/main.tsx
++++ b/src/main.tsx
+@@ -39,9 +39,21 @@ if (!container) {
+ // Do not even evaluate the main bootstrap module in a satellite document.
+ const satellite = new URLSearchParams(window.location.search).get("panelWindow") === "1";
+ const Entry = lazy(() =>
+-  satellite
+-    ? import("@/app/SatelliteApp").then(({ SatelliteApp }) => ({ default: SatelliteApp }))
+-    : import("@/App").then(({ App }) => ({ default: App })),
++  import.meta.env.DEV &&
++  import.meta.env.VITE_TUNNELDE_DEBUGGER === "1" &&
++  "__TAURI_INTERNALS__" in window
++    ? (async () => {
++        if (!satellite) {
++          const { invoke } = await import("@tauri-apps/api/core");
++          const context = await invoke<{ mode: string }>("debugger_context");
++          if (context.mode === "native-mock") (await import("@/debugger/storage")).isolateStorage();
++        }
++        const { NativeEntry, DebugSatelliteEntry } = await import("@/debugger/native");
++        return { default: satellite ? DebugSatelliteEntry : NativeEntry };
++      })()
++    : satellite
++      ? import("@/app/SatelliteApp").then(({ SatelliteApp }) => ({ default: SatelliteApp }))
++      : import("@/App").then(({ App }) => ({ default: App })),
+ );
+ function RootFailure({ event }: { event: DiagnosticEvent | null }) {
+   useEffect(() => {
+diff --git a/docs/en-us/development/debugger.md b/docs/en-us/development/debugger.md
+new file mode 100644
+index 00000000..2f3a728a
+--- /dev/null
++++ b/docs/en-us/development/debugger.md
+@@ -0,0 +1,15 @@
++# Development debugger adapter
++
++TunneldeDebugger is a separate source-only workbench. Its adapter reuses production AppShell, controls and Services; scenario data, presets, runner orchestration and acceptance records live in the debugger repository. This is an internal development contract, separate from the stable local API.
++
++The frontend entry requires both `import.meta.env.DEV` and `VITE_TUNNELDE_DEBUGGER=1`. Rust registers its module, commands and endpoint only under `cfg(all(feature="debugger", debug_assertions))`. Runtime activation additionally requires `TUNNELDE_DEBUGGER_ACTIVE=1`, the `dev.tunnelde.debugtarget` identifier, an isolated data/plugin directory and a marker matching the UUID run ID. Credentials use the existing application-specific vault namespace.
++
++`src/debugger/index.tsx` mounts production components against controlled, mutable Services fixtures. Unsupported operations fail explicitly. Mock documents use in-memory storage and reload on generation changes to release singleton resources. No third-party plugin code runs in the bundled mock plugin example.
++
++`src/debugger/native.tsx` also supports real services: backend host/settings preparation, a temporary local file, synthetic SSH/SFTP and normal workspace navigation. Both file panes start at fixture roots. The SSH fixture echoes input without a system shell; its SFTP adapter rejects traversal and symlinks. Normal production file navigation remains available to an operator.
++
++The independent loopback TCP endpoint publishes a private descriptor containing protocol version, address, runId and an independent random token. It reuses local transport primitives, capacity limits and timeouts. Registered commands expose capabilities, apply, snapshot/events, checks and presentation; they never evaluate JavaScript or forward arbitrary Tauri invokes. The coordinator alone polls and acknowledges rendering. Requests/results require matching generations. Real-service reset uses a new process/profile. Native ownership and window-return operations retain the production lease protocol.
++
++Adding a surface requires matching registrations in the debugger's `shared/scenarios.ts`, this adapter and Rust's registered surfaces. State presets should be marked unsupported unless the production component's state is actually adapted. Browser, native UI simulation and real-service results must remain distinguishable. Verify type checking, relevant regressions, feature/non-feature Rust builds and production bundle exclusion after modifying the boundary.
++
++Use the debugger repository's setup command to apply its pinned integration patch in a separate worktree; do not overwrite a developer's dirty checkout. Source identity includes revision, working-change fingerprint and protocol version. Screenshots are target-window evidence; automatic checks do not grant manual visual approval.
+diff --git a/docs/zh-cn/development/debugger.md b/docs/zh-cn/development/debugger.md
+new file mode 100644
+index 00000000..a361e50e
+--- /dev/null
++++ b/docs/zh-cn/development/debugger.md
+@@ -0,0 +1,15 @@
++# 开发调试器适配
++
++TunneldeDebugger 是独立的源码运行工作台。适配器复用生产 AppShell、控件和 Services；场景数据、预设、运行器编排及验收记录由调试器仓库维护。这是内部开发契约，与稳定本地 API 分开。
++
++前端入口同时要求 `import.meta.env.DEV` 与 `VITE_TUNNELDE_DEBUGGER=1`。Rust 仅在 `cfg(all(feature="debugger", debug_assertions))` 下注册模块、命令及端点。运行时还要求 `TUNNELDE_DEBUGGER_ACTIVE=1`、`dev.tunnelde.debugtarget` 标识、独立数据/插件目录和匹配 UUID runId 的目录标记。凭据使用已有的应用标识专属 vault 命名空间。
++
++`src/debugger/index.tsx` 通过受控、可变的 Services 数据渲染生产组件。未支持的操作明确失败。模拟文档使用内存存储，切换代次时重载以释放单例资源。内置合成插件示例不运行第三方插件代码。
++
++`src/debugger/native.tsx` 还支持真实服务：后端准备主机和设置、临时本地文件、合成 SSH/SFTP 及正常工作区导航。两个文件面板初始均打开验收目录。SSH 服务只回显输入，不运行系统 shell；SFTP 适配器拒绝路径穿越和符号链接。操作者仍可使用正常生产文件导航。
++
++独立 loopback TCP 端点发布私有描述文件，包含协议版本、地址、runId 和独立随机令牌，复用本地传输原语、容量和超时限制。登记命令提供能力发现、应用、快照/事件、检查和呈现，不执行 JavaScript 或转发任意 Tauri invoke。只有协调主窗口可轮询并确认渲染，请求及结果要求代次匹配。真实服务重置使用新进程/配置目录。原生所有权与窗口返回继续使用生产租约协议。
++
++新增界面需同步调试器 `shared/scenarios.ts`、此适配器和 Rust 界面登记表。只有实际适配生产组件状态后才能声明支持对应预设。浏览器、原生界面模拟和真实服务结果必须可区分。修改边界后应验证类型、相关回归、启用/禁用 feature 的 Rust 构建及生产包排除。
++
++使用调试器仓库 setup 命令在独立 worktree 应用固定基线的集成补丁，不覆盖开发者已有的未提交工作区。源码身份包含版本、工作区变更指纹及协议版本。截图属于目标窗口证据，自动检查不授予人工视觉通过结论。
+diff --git a/src-tauri/src/debugger/fixture.rs b/src-tauri/src/debugger/fixture.rs
+new file mode 100644
+index 00000000..a093293f
+--- /dev/null
++++ b/src-tauri/src/debugger/fixture.rs
+@@ -0,0 +1,535 @@
++//! Loopback-only synthetic SSH/SFTP service. No shell execution or outside paths.
++use russh::{
++    server::{self, Server as _, Session},
++    Channel, ChannelId,
++};
++use russh_sftp::protocol::{
++    Attrs, Data, File as SftpFile, FileAttributes, Handle, Name, OpenFlags, Packet, Status,
++    StatusCode, Version,
++};
++use serde::Serialize;
++use std::{
++    collections::{HashMap, HashSet},
++    io::{Read, Seek, SeekFrom, Write},
++    path::{Component, Path, PathBuf},
++    sync::Arc,
++};
++#[derive(Serialize)]
++pub(super) struct Descriptor {
++    pub port: u16,
++    password: String,
++}
++pub(super) async fn start(root: PathBuf) -> Result<Descriptor, String> {
++    let socket = tokio::net::TcpListener::bind(("127.0.0.1", 0))
++        .await
++        .map_err(|e| e.to_string())?;
++    let port = socket.local_addr().map_err(|e| e.to_string())?.port();
++    let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
++        .map_err(|e| e.to_string())?;
++    let password = uuid::Uuid::new_v4().to_string();
++    let mut server = FixtureServer {
++        root: Arc::new(root.canonicalize().map_err(|e| e.to_string())?),
++        password: password.clone(),
++        channels: HashMap::new(),
++        shells: HashSet::new(),
++    };
++    let config = Arc::new(server::Config {
++        keys: vec![key],
++        auth_rejection_time: std::time::Duration::from_millis(50),
++        ..Default::default()
++    });
++    tokio::spawn(async move {
++        let _ = server.run_on_socket(config, &socket).await;
++    });
++    Ok(Descriptor { port, password })
++}
++struct FixtureServer {
++    root: Arc<PathBuf>,
++    password: String,
++    channels: HashMap<ChannelId, Channel<server::Msg>>,
++    shells: HashSet<ChannelId>,
++}
++impl server::Server for FixtureServer {
++    type Handler = Self;
++    fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
++        Self {
++            root: self.root.clone(),
++            password: self.password.clone(),
++            channels: HashMap::new(),
++            shells: HashSet::new(),
++        }
++    }
++}
++impl server::Handler for FixtureServer {
++    type Error = russh::Error;
++    async fn auth_password(
++        &mut self,
++        user: &str,
++        password: &str,
++    ) -> Result<server::Auth, Self::Error> {
++        Ok(if user == "debugger" && password == self.password {
++            server::Auth::Accept
++        } else {
++            server::Auth::Reject {
++                proceed_with_methods: None,
++                partial_success: false,
++            }
++        })
++    }
++    async fn channel_open_session(
++        &mut self,
++        channel: Channel<server::Msg>,
++        reply: server::ChannelOpenHandle,
++        _: &mut Session,
++    ) -> Result<(), Self::Error> {
++        self.channels.insert(channel.id(), channel);
++        reply.accept().await;
++        Ok(())
++    }
++    async fn pty_request(
++        &mut self,
++        channel: ChannelId,
++        _: &str,
++        _: u32,
++        _: u32,
++        _: u32,
++        _: u32,
++        _: &[(russh::Pty, u32)],
++        session: &mut Session,
++    ) -> Result<(), Self::Error> {
++        session.channel_success(channel)?;
++        Ok(())
++    }
++    async fn shell_request(
++        &mut self,
++        channel: ChannelId,
++        session: &mut Session,
++    ) -> Result<(), Self::Error> {
++        self.shells.insert(channel);
++        session.channel_success(channel)?;
++        session.data(channel, b"Tunnelde isolated SSH fixture\r\nNo system shell. Type to verify terminal input.\r\n$ ".to_vec())?;
++        Ok(())
++    }
++    async fn data(
++        &mut self,
++        channel: ChannelId,
++        data: &[u8],
++        session: &mut Session,
++    ) -> Result<(), Self::Error> {
++        if !self.shells.contains(&channel) {
++            return Ok(());
++        }
++        let output = data
++            .iter()
++            .flat_map(|byte| {
++                if *byte == b'\r' {
++                    b"\r\n$ ".to_vec()
++                } else {
++                    vec![*byte]
++                }
++            })
++            .collect::<Vec<_>>();
++        session.data(channel, output)?;
++        Ok(())
++    }
++    async fn exec_request(
++        &mut self,
++        channel: ChannelId,
++        command: &[u8],
++        session: &mut Session,
++    ) -> Result<(), Self::Error> {
++        session.channel_success(channel)?;
++        let response = if command == b"pwd" {
++            "/\n"
++        } else {
++            "Synthetic SSH fixture: exec is intentionally unavailable\n"
++        };
++        session.data(channel, response.as_bytes().to_vec())?;
++        session.exit_status_request(channel, if command == b"pwd" { 0 } else { 127 })?;
++        session.eof(channel)?;
++        session.close(channel)?;
++        Ok(())
++    }
++    async fn subsystem_request(
++        &mut self,
++        channel: ChannelId,
++        name: &str,
++        session: &mut Session,
++    ) -> Result<(), Self::Error> {
++        if name != "sftp" {
++            session.channel_failure(channel)?;
++            return Ok(());
++        }
++        session.channel_success(channel)?;
++        if let Some(stream) = self.channels.remove(&channel) {
++            let handler = Sftp {
++                root: self.root.clone(),
++                files: HashMap::new(),
++                directories: HashMap::new(),
++            };
++            tokio::spawn(russh_sftp::server::run(stream.into_stream(), handler));
++        }
++        Ok(())
++    }
++    async fn channel_close(
++        &mut self,
++        channel: ChannelId,
++        _: &mut Session,
++    ) -> Result<(), Self::Error> {
++        self.channels.remove(&channel);
++        self.shells.remove(&channel);
++        Ok(())
++    }
++}
++struct Sftp {
++    root: Arc<PathBuf>,
++    files: HashMap<String, std::fs::File>,
++    directories: HashMap<String, Vec<SftpFile>>,
++}
++fn status(id: u32) -> Status {
++    Status {
++        id,
++        status_code: StatusCode::Ok,
++        error_message: String::new(),
++        language_tag: String::new(),
++    }
++}
++fn io_error(error: std::io::Error) -> StatusCode {
++    match error.kind() {
++        std::io::ErrorKind::NotFound => StatusCode::NoSuchFile,
++        std::io::ErrorKind::PermissionDenied => StatusCode::PermissionDenied,
++        _ => StatusCode::Failure,
++    }
++}
++fn attributes(metadata: &std::fs::Metadata) -> FileAttributes {
++    #[cfg(unix)]
++    let (mode, uid, gid) = {
++        use std::os::unix::fs::MetadataExt;
++        (metadata.mode(), metadata.uid(), metadata.gid())
++    };
++    #[cfg(not(unix))]
++    let (mode, uid, gid) = (
++        if metadata.is_dir() {
++            0o040700
++        } else {
++            0o100600
++        },
++        1000,
++        1000,
++    );
++    FileAttributes {
++        size: Some(metadata.len()),
++        permissions: Some(mode),
++        uid: Some(uid),
++        gid: Some(gid),
++        atime: Some(1_795_558_400),
++        mtime: Some(1_795_558_400),
++        ..FileAttributes::empty()
++    }
++}
++impl Sftp {
++    fn path(&self, input: &str) -> Result<PathBuf, StatusCode> {
++        let mut result = self.root.as_ref().clone();
++        for component in Path::new(input).components() {
++            match component {
++                Component::RootDir | Component::CurDir => {}
++                Component::Normal(part) => {
++                    result.push(part);
++                    if std::fs::symlink_metadata(&result).is_ok_and(|m| m.file_type().is_symlink())
++                    {
++                        return Err(StatusCode::PermissionDenied);
++                    }
++                }
++                _ => return Err(StatusCode::PermissionDenied),
++            }
++        }
++        Ok(result)
++    }
++}
++impl russh_sftp::server::Handler for Sftp {
++    type Error = StatusCode;
++    fn unimplemented(&self) -> StatusCode {
++        StatusCode::OpUnsupported
++    }
++    async fn init(&mut self, _: u32, _: HashMap<String, String>) -> Result<Version, StatusCode> {
++        let mut version = Version::new();
++        version
++            .extensions
++            .insert("posix-rename@openssh.com".into(), "1".into());
++        version
++            .extensions
++            .insert("fsync@openssh.com".into(), "1".into());
++        Ok(version)
++    }
++    async fn extended(
++        &mut self,
++        id: u32,
++        request: String,
++        data: Vec<u8>,
++    ) -> Result<Packet, StatusCode> {
++        fn string(data: &mut &[u8]) -> Result<String, StatusCode> {
++            if data.len() < 4 {
++                return Err(StatusCode::BadMessage);
++            }
++            let len = u32::from_be_bytes(data[..4].try_into().map_err(|_| StatusCode::BadMessage)?)
++                as usize;
++            if len > 4096 || data.len() < len + 4 {
++                return Err(StatusCode::BadMessage);
++            }
++            let value = std::str::from_utf8(&data[4..len + 4])
++                .map_err(|_| StatusCode::BadMessage)?
++                .to_owned();
++            *data = &data[len + 4..];
++            Ok(value)
++        }
++        let mut bytes = data.as_slice();
++        if request == "posix-rename@openssh.com" {
++            let from = self.path(&string(&mut bytes)?)?;
++            let to = self.path(&string(&mut bytes)?)?;
++            if !bytes.is_empty() || from == *self.root || to == *self.root {
++                return Err(StatusCode::PermissionDenied);
++            }
++            std::fs::rename(from, to).map_err(io_error)?;
++        } else if request == "fsync@openssh.com" {
++            let handle = string(&mut bytes)?;
++            if !bytes.is_empty() {
++                return Err(StatusCode::BadMessage);
++            }
++            self.files
++                .get(&handle)
++                .ok_or(StatusCode::Failure)?
++                .sync_all()
++                .map_err(io_error)?;
++        } else {
++            return Err(StatusCode::OpUnsupported);
++        }
++        Ok(Packet::Status(status(id)))
++    }
++    async fn fsetstat(
++        &mut self,
++        id: u32,
++        handle: String,
++        attrs: FileAttributes,
++    ) -> Result<Status, StatusCode> {
++        let file = self.files.get(&handle).ok_or(StatusCode::Failure)?;
++        if let Some(size) = attrs.size {
++            if size > 16 * 1024 * 1024 {
++                return Err(StatusCode::Failure);
++            }
++            file.set_len(size).map_err(io_error)?;
++        }
++        #[cfg(unix)]
++        if let Some(permissions) = attrs.permissions {
++            use std::os::unix::fs::PermissionsExt;
++            file.set_permissions(std::fs::Permissions::from_mode(permissions & 0o777))
++                .map_err(io_error)?;
++        }
++        Ok(status(id))
++    }
++    async fn setstat(
++        &mut self,
++        id: u32,
++        path: String,
++        attrs: FileAttributes,
++    ) -> Result<Status, StatusCode> {
++        let path = self.path(&path)?;
++        #[cfg(unix)]
++        if let Some(permissions) = attrs.permissions {
++            use std::os::unix::fs::PermissionsExt;
++            std::fs::set_permissions(path, std::fs::Permissions::from_mode(permissions & 0o777))
++                .map_err(io_error)?;
++        }
++        Ok(status(id))
++    }
++    async fn realpath(&mut self, id: u32, path: String) -> Result<Name, StatusCode> {
++        let resolved = self.path(&path)?;
++        let relative = resolved
++            .strip_prefix(self.root.as_ref())
++            .map_err(|_| StatusCode::PermissionDenied)?;
++        Ok(Name {
++            id,
++            files: vec![SftpFile::dummy(format!("/{}", relative.to_string_lossy()))],
++        })
++    }
++    async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
++        Ok(Attrs {
++            id,
++            attrs: attributes(&std::fs::metadata(self.path(&path)?).map_err(io_error)?),
++        })
++    }
++    async fn lstat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
++        self.stat(id, path).await
++    }
++    async fn fstat(&mut self, id: u32, handle: String) -> Result<Attrs, StatusCode> {
++        Ok(Attrs {
++            id,
++            attrs: attributes(
++                &self
++                    .files
++                    .get(&handle)
++                    .ok_or(StatusCode::Failure)?
++                    .metadata()
++                    .map_err(io_error)?,
++            ),
++        })
++    }
++    async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, StatusCode> {
++        if self.directories.len() >= 64 {
++            return Err(StatusCode::Failure);
++        }
++        let entries = std::fs::read_dir(self.path(&path)?)
++            .map_err(io_error)?
++            .map(|entry| {
++                let entry = entry.map_err(io_error)?;
++                let name = entry.file_name().to_string_lossy().into_owned();
++                let metadata = entry.metadata().map_err(io_error)?;
++                Ok(SftpFile {
++                    filename: name.clone(),
++                    longname: name,
++                    attrs: attributes(&metadata),
++                })
++            })
++            .collect::<Result<Vec<_>, StatusCode>>()?;
++        let handle = uuid::Uuid::new_v4().to_string();
++        self.directories.insert(handle.clone(), entries);
++        Ok(Handle { id, handle })
++    }
++    async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, StatusCode> {
++        let directory = self
++            .directories
++            .get_mut(&handle)
++            .ok_or(StatusCode::Failure)?;
++        if directory.is_empty() {
++            return Err(StatusCode::Eof);
++        }
++        let count = directory.len().min(128);
++        Ok(Name {
++            id,
++            files: directory.drain(..count).collect(),
++        })
++    }
++    async fn open(
++        &mut self,
++        id: u32,
++        filename: String,
++        flags: OpenFlags,
++        attrs: FileAttributes,
++    ) -> Result<Handle, StatusCode> {
++        if self.files.len() >= 64 {
++            return Err(StatusCode::Failure);
++        }
++        let mut options = std::fs::OpenOptions::new();
++        options
++            .read(flags.contains(OpenFlags::READ))
++            .write(flags.contains(OpenFlags::WRITE))
++            .create(flags.contains(OpenFlags::CREATE))
++            .truncate(flags.contains(OpenFlags::TRUNCATE))
++            .create_new(flags.contains(OpenFlags::EXCLUDE));
++        #[cfg(unix)]
++        {
++            use std::os::unix::fs::OpenOptionsExt;
++            options.mode(attrs.permissions.unwrap_or(0o600) & 0o777);
++        }
++        let file = options.open(self.path(&filename)?).map_err(io_error)?;
++        let handle = uuid::Uuid::new_v4().to_string();
++        self.files.insert(handle.clone(), file);
++        Ok(Handle { id, handle })
++    }
++    async fn read(
++        &mut self,
++        id: u32,
++        handle: String,
++        offset: u64,
++        len: u32,
++    ) -> Result<Data, StatusCode> {
++        let file = self.files.get_mut(&handle).ok_or(StatusCode::Failure)?;
++        file.seek(SeekFrom::Start(offset)).map_err(io_error)?;
++        let mut data = vec![0; len.min(65536) as usize];
++        let size = file.read(&mut data).map_err(io_error)?;
++        if size == 0 {
++            return Err(StatusCode::Eof);
++        }
++        data.truncate(size);
++        Ok(Data { id, data })
++    }
++    async fn write(
++        &mut self,
++        id: u32,
++        handle: String,
++        offset: u64,
++        data: Vec<u8>,
++    ) -> Result<Status, StatusCode> {
++        if offset > 16 * 1024 * 1024 || data.len() > 1024 * 1024 {
++            return Err(StatusCode::Failure);
++        }
++        let file = self.files.get_mut(&handle).ok_or(StatusCode::Failure)?;
++        file.seek(SeekFrom::Start(offset)).map_err(io_error)?;
++        file.write_all(&data).map_err(io_error)?;
++        Ok(status(id))
++    }
++    async fn close(&mut self, id: u32, handle: String) -> Result<Status, StatusCode> {
++        self.files.remove(&handle);
++        self.directories.remove(&handle);
++        Ok(status(id))
++    }
++    async fn mkdir(
++        &mut self,
++        id: u32,
++        path: String,
++        attrs: FileAttributes,
++    ) -> Result<Status, StatusCode> {
++        let path = self.path(&path)?;
++        std::fs::create_dir(&path).map_err(io_error)?;
++        #[cfg(unix)]
++        if let Some(mode) = attrs.permissions {
++            use std::os::unix::fs::PermissionsExt;
++            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & 0o777))
++                .map_err(io_error)?;
++        }
++        Ok(status(id))
++    }
++    async fn remove(&mut self, id: u32, filename: String) -> Result<Status, StatusCode> {
++        std::fs::remove_file(self.path(&filename)?).map_err(io_error)?;
++        Ok(status(id))
++    }
++    async fn rmdir(&mut self, id: u32, path: String) -> Result<Status, StatusCode> {
++        let path = self.path(&path)?;
++        if path == *self.root {
++            return Err(StatusCode::PermissionDenied);
++        }
++        std::fs::remove_dir(path).map_err(io_error)?;
++        Ok(status(id))
++    }
++    async fn rename(
++        &mut self,
++        id: u32,
++        oldpath: String,
++        newpath: String,
++    ) -> Result<Status, StatusCode> {
++        let from = self.path(&oldpath)?;
++        let to = self.path(&newpath)?;
++        if from == *self.root || to == *self.root {
++            return Err(StatusCode::PermissionDenied);
++        }
++        if to.exists() {
++            return Err(StatusCode::Failure);
++        }
++        std::fs::rename(from, to).map_err(io_error)?;
++        Ok(status(id))
++    }
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn paths_cannot_escape_fixture() {
++        let root = std::env::temp_dir();
++        let sftp = Sftp {
++            root: Arc::new(root.clone()),
++            files: HashMap::new(),
++            directories: HashMap::new(),
++        };
++        assert_eq!(sftp.path("/README.md").unwrap(), root.join("README.md"));
++        assert!(sftp.path("../outside").is_err());
++    }
++}
+diff --git a/src-tauri/src/debugger/mod.rs b/src-tauri/src/debugger/mod.rs
+new file mode 100644
+index 00000000..f577b72d
+--- /dev/null
++++ b/src-tauri/src/debugger/mod.rs
+@@ -0,0 +1,552 @@
++//! Opt-in development capability. No arbitrary eval, invoke or SQL transport.
++mod fixture;
++use crate::{
++    error::{AppError, AppResult},
++    state::AppState,
++};
++use serde::{Deserialize, Serialize};
++use serde_json::{json, Value};
++use std::{
++    path::PathBuf,
++    sync::{Arc, Mutex},
++    time::Duration,
++};
++use tauri::{AppHandle, Manager};
++use tokio::{
++    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
++    net::{TcpListener, TcpStream},
++    sync::watch,
++};
++
++#[derive(Clone, Deserialize, Serialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct Parameters {
++    preset: String,
++    theme: String,
++    locale: String,
++    width: u32,
++    height: u32,
++    count: u32,
++    seed: u32,
++}
++impl Parameters {
++    fn validate(&self) -> Result<(), String> {
++        if ![
++            "normal", "empty", "loading", "error", "boundary", "disabled",
++        ]
++        .contains(&self.preset.as_str())
++            || !["dark", "light"].contains(&self.theme.as_str())
++            || !["zh-CN", "en-US"].contains(&self.locale.as_str())
++            || !(280..=3840).contains(&self.width)
++            || !(200..=2160).contains(&self.height)
++            || self.count > 10000
++            || self.seed > 2147483647
++        {
++            return Err("invalid scenario parameters".into());
++        }
++        Ok(())
++    }
++}
++const SURFACES: &[&str] = &[
++    "workbench",
++    "hosts",
++    "host-details",
++    "host-transfer",
++    "connect",
++    "connections",
++    "known-hosts",
++    "terminal",
++    "files",
++    "editor",
++    "editor-conflict",
++    "preview",
++    "forwarding",
++    "socks",
++    "monitor",
++    "processes",
++    "tasks",
++    "output",
++    "history",
++    "plugins",
++    "plugin-details",
++    "plugin-view",
++    "welcome",
++    "about",
++    "dialogs",
++    "menus",
++    "notifications",
++    "forms",
++    "floating",
++    "settings-general",
++    "settings-network",
++    "settings-appearance",
++    "settings-workspace",
++    "settings-terminal",
++    "settings-shortcuts",
++    "settings-files",
++    "settings-editor",
++    "settings-monitor",
++    "settings-updates",
++    "settings-plugins",
++    "settings-advanced",
++    "settings-about",
++    "settings-habits",
++];
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct Apply {
++    generation: u64,
++    scenario_id: String,
++    parameters: Parameters,
++}
++#[derive(Default)]
++struct Inner {
++    generation: u64,
++    request: Option<Value>,
++    ready: bool,
++    preparing: bool,
++    error: Option<String>,
++    snapshot: Value,
++    action: Option<Value>,
++    result: Option<Value>,
++}
++struct Runtime {
++    mode: String,
++    run_id: String,
++    data: PathBuf,
++    inner: Mutex<Inner>,
++    shutdown: watch::Sender<bool>,
++}
++impl Drop for Runtime {
++    fn drop(&mut self) {
++        let _ = self.shutdown.send(true);
++        let _ = std::fs::remove_file(self.data.join("debugger.json"));
++    }
++}
++type Shared = Arc<Runtime>;
++
++pub(crate) fn start(app: &AppHandle) -> AppResult<()> {
++    if std::env::var("TUNNELDE_DEBUGGER_ACTIVE").as_deref() != Ok("1") {
++        return Ok(());
++    }
++    if app.config().identifier != "dev.tunnelde.debugtarget" {
++        return Err(AppError::validation(
++            "debugger requires isolated application identifier",
++        ));
++    }
++    let run_id = std::env::var("TUNNELDE_DEBUGGER_RUN_ID")
++        .map_err(|_| AppError::validation("missing debugger run ID"))?;
++    uuid::Uuid::parse_str(&run_id).map_err(|_| AppError::validation("invalid debugger run ID"))?;
++    let mode = std::env::var("TUNNELDE_DEBUGGER_MODE").unwrap_or_default();
++    if !["native-mock", "native-service"].contains(&mode.as_str()) {
++        return Err(AppError::validation("invalid debugger mode"));
++    }
++    let data = app
++        .state::<AppState>()
++        .data_dir
++        .canonicalize()
++        .map_err(|_| AppError::validation("invalid debugger profile"))?;
++    let marker: Value = serde_json::from_slice(
++        &std::fs::read(data.join(".debugger-profile"))
++            .map_err(|_| AppError::validation("missing debugger profile marker"))?,
++    )
++    .map_err(|_| AppError::validation("invalid debugger marker"))?;
++    if marker["runId"] != run_id || marker["version"] != 1 {
++        return Err(AppError::validation("debugger profile mismatch"));
++    }
++    let (shutdown, stopped) = watch::channel(false);
++    let runtime = Arc::new(Runtime {
++        mode,
++        run_id,
++        data,
++        inner: Mutex::new(Inner::default()),
++        shutdown,
++    });
++    app.manage(runtime.clone());
++    let app = app.clone();
++    tauri::async_runtime::spawn(async move {
++        if let Err(error) = serve(app, runtime, stopped).await {
++            tracing::warn!(target: "debugger", kind = ?error.kind(), "Development debugger stopped");
++        }
++    });
++    Ok(())
++}
++pub(crate) fn stop(app: &AppHandle) {
++    if let Some(runtime) = app.try_state::<Shared>() {
++        let _ = runtime.shutdown.send(true);
++        let _ = std::fs::remove_file(runtime.data.join("debugger.json"));
++    }
++}
++async fn serve(
++    app: AppHandle,
++    runtime: Shared,
++    stopped: watch::Receiver<bool>,
++) -> std::io::Result<()> {
++    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
++    let token = format!(
++        "{}{}",
++        uuid::Uuid::new_v4().simple(),
++        uuid::Uuid::new_v4().simple()
++    );
++    let endpoint = json!({"version":1,"address":listener.local_addr()?.to_string(),"token":token,"runId":runtime.run_id});
++    let path = runtime.data.join("debugger.json");
++    {
++        use std::io::Write;
++        let mut options = std::fs::OpenOptions::new();
++        options.write(true).create_new(true);
++        #[cfg(unix)]
++        {
++            use std::os::unix::fs::OpenOptionsExt;
++            options.mode(0o600);
++        }
++        let mut file = options.open(&path)?;
++        file.write_all(&serde_json::to_vec(&endpoint)?)?;
++    }
++    let result = crate::automation::transport::listener::serve(listener, stopped, move |stream| {
++        let app = app.clone();
++        let runtime = runtime.clone();
++        let token = token.clone();
++        async move { connection(stream, app, runtime, &token).await }
++    })
++    .await;
++    let _ = std::fs::remove_file(path);
++    result
++}
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct Request {
++    version: u8,
++    id: String,
++    token: String,
++    run_id: String,
++    method: String,
++    params: Value,
++}
++fn authenticate(request: &Request, token: &str, run_id: &str) -> Result<(), String> {
++    if request.token.len() != 64
++        || !crate::automation::transport::equal(&request.token, token)
++        || request.run_id != run_id
++    {
++        return Err("unauthorized".into());
++    }
++    if request.version != 1
++        || request.id.is_empty()
++        || request.id.len() > 128
++        || request.id.chars().any(char::is_control)
++        || !request.params.is_object()
++    {
++        return Err("invalid_request".into());
++    }
++    Ok(())
++}
++async fn connection(
++    stream: TcpStream,
++    app: AppHandle,
++    runtime: Shared,
++    token: &str,
++) -> std::io::Result<()> {
++    tokio::time::timeout(Duration::from_secs(12), async {
++        let mut reader = BufReader::new(stream);
++        let mut bytes = Vec::new();
++        (&mut reader)
++            .take(1024 * 1024 + 1)
++            .read_until(b'\n', &mut bytes)
++            .await?;
++        let mut id = String::new();
++        let result = if bytes.len() > 1024 * 1024 || bytes.last() != Some(&b'\n') {
++            Err("invalid_request".into())
++        } else {
++            match serde_json::from_slice::<Request>(&bytes) {
++                Err(_) => Err("invalid_request".into()),
++                Ok(request) => {
++                    id.clone_from(&request.id);
++                    match authenticate(&request, token, &runtime.run_id) {
++                        Err(error) => Err(error),
++                        Ok(()) => call(&app, &runtime, &request.method, request.params).await,
++                    }
++                }
++            }
++        };
++        let response = match result {
++            Ok(value) => json!({"version":1,"id":id,"result":value}),
++            Err(error) => {
++                json!({"version":1,"id":id,"error":{"code":"debugger_rejected","message":error}})
++            }
++        };
++        let mut output = serde_json::to_vec(&response)?;
++        if output.len() > 4 * 1024 * 1024 {
++            return Err(std::io::ErrorKind::InvalidData.into());
++        }
++        output.push(b'\n');
++        reader.get_mut().write_all(&output).await?;
++        reader.get_mut().shutdown().await
++    })
++    .await
++    .map_err(|_| std::io::ErrorKind::TimedOut)?
++}
++async fn call(
++    app: &AppHandle,
++    runtime: &Shared,
++    method: &str,
++    params: Value,
++) -> Result<Value, String> {
++    match method {
++        "debug.describe" => Ok(
++            json!({"protocol":1,"runId":runtime.run_id,"mode":runtime.mode,"surfaces":SURFACES,"methods":["debug.describe","debug.apply","debug.snapshot","debug.windows","debug.present","debug.check","debug.events"],"realServiceMaxCount":1000}),
++        ),
++        "debug.snapshot" | "debug.events" => {
++            let inner = runtime
++                .inner
++                .lock()
++                .map_err(|_| "debugger state poisoned")?;
++            Ok(
++                json!({"generation":inner.generation,"ready":inner.ready,"error":inner.error,"snapshot":inner.snapshot,"result":inner.result}),
++            )
++        }
++        "debug.apply" => {
++            let input: Apply =
++                serde_json::from_value(params).map_err(|_| "invalid scene request")?;
++            input.parameters.validate()?;
++            if !SURFACES.contains(&input.scenario_id.as_str()) {
++                return Err("unregistered scene".into());
++            }
++            {
++                let mut inner = runtime
++                    .inner
++                    .lock()
++                    .map_err(|_| "debugger state poisoned")?;
++                if input.generation <= inner.generation || inner.preparing {
++                    return Err("stale generation or preparation pending".into());
++                }
++                if runtime.mode == "native-service" && inner.generation > 0 {
++                    return Err("real-service reset requires a fresh profile".into());
++                }
++                inner.generation = input.generation;
++                inner.ready = false;
++                inner.error = None;
++                inner.preparing = true;
++            }
++            if let Some(window) = app.get_webview_window("main") {
++                let _ = window.set_min_size(Some(tauri::LogicalSize::new(280.0, 200.0)));
++                let _ = window.set_size(tauri::LogicalSize::new(
++                    input.parameters.width as f64,
++                    input.parameters.height as f64,
++                ));
++            }
++            let prepared = if runtime.mode == "native-service" {
++                prepare_real(app, runtime, &input).await
++            } else {
++                Ok(json!({}))
++            };
++            let mut inner = runtime
++                .inner
++                .lock()
++                .map_err(|_| "debugger state poisoned")?;
++            inner.preparing = false;
++            match prepared {
++                Ok(prepared) => {
++                    inner.request = Some(
++                        json!({"generation":input.generation,"scenarioId":input.scenario_id,"parameters":input.parameters,"mode":runtime.mode,"prepared":prepared}),
++                    );
++                    Ok(json!({"accepted":true,"generation":input.generation}))
++                }
++                Err(error) => {
++                    inner.error = Some(error.clone());
++                    Err(error)
++                }
++            }
++        }
++        "debug.present" | "debug.check" => {
++            let generation = params["generation"].as_u64().ok_or("generation required")?;
++            let placement = if method == "debug.check" {
++                "verify"
++            } else {
++                params["placement"].as_str().ok_or("placement required")?
++            };
++            if !["native", "main", "floating", "verify"].contains(&placement) {
++                return Err("unregistered placement".into());
++            }
++            let mut inner = runtime
++                .inner
++                .lock()
++                .map_err(|_| "debugger state poisoned")?;
++            if generation != inner.generation || !inner.ready || inner.action.is_some() {
++                return Err("stale or unavailable scene".into());
++            }
++            if runtime.mode != "native-service" && placement != "verify" {
++                return Err("window ownership acceptance requires real-service mode".into());
++            }
++            let id = uuid::Uuid::new_v4().to_string();
++            inner.result = None;
++            inner.action = Some(json!({"id":id,"generation":generation,"placement":placement}));
++            Ok(json!({"accepted":true,"id":id}))
++        }
++        "debug.focus" => {
++            let label = params["label"].as_str().unwrap_or("main");
++            let window = app
++                .get_webview_window(label)
++                .ok_or("unknown target window")?;
++            window.show().map_err(|error| error.to_string())?;
++            window.unminimize().map_err(|error| error.to_string())?;
++            window.set_focus().map_err(|error| error.to_string())?;
++            Ok(json!({"focused":label}))
++        }
++        "debug.windows" => windows(app).await,
++        _ => Err("unknown debugger method".into()),
++    }
++}
++async fn prepare_real(app: &AppHandle, runtime: &Shared, input: &Apply) -> Result<Value, String> {
++    if !input.scenario_id.starts_with("settings-")
++        && ![
++            "workbench",
++            "hosts",
++            "host-details",
++            "terminal",
++            "files",
++            "editor",
++            "floating",
++        ]
++        .contains(&input.scenario_id.as_str())
++    {
++        return Err("scene has no real-service adapter".into());
++    }
++    crate::services::settings::update(app, json!({"theme":input.parameters.theme,"language":input.parameters.locale,"autoCheckUpdates":false,"restoreWorkspace":false,"disconnectOnPanelClose":false,"closeToTray":false})).await.map_err(|error| error.to_string())?;
++    let fixture = if ["terminal", "files"].contains(&input.scenario_id.as_str()) {
++        Some(fixture::start(runtime.data.join("files")).await?)
++    } else {
++        None
++    };
++    let count = if input.parameters.preset == "empty" {
++        0
++    } else {
++        input.parameters.count.clamp(1, 1000)
++    };
++    let app = app.clone();
++    let scenario_id = input.scenario_id.clone();
++    let hosts = tauri::async_runtime::spawn_blocking(move || {
++        let state = app.state::<AppState>(); let service = crate::services::hosts::service(&app, &state); let mut hosts = Vec::new();
++        for i in 0..count { let host: crate::models::HostInput = serde_json::from_value(json!({"name":format!("Debugger host {:04}", i + 1),"host":if fixture.is_some() { "127.0.0.1" } else { "example.test" },"port":fixture.as_ref().map(|f| f.port).unwrap_or(22),"username":"debugger","authMethod":"password","tags":["synthetic",scenario_id]})).map_err(|error| error.to_string())?; hosts.push(service.create(host).map_err(|error| error.to_string())?); }
++        Ok::<_, String>((hosts, fixture))
++    }).await.map_err(|error| error.to_string())??;
++    Ok(json!({"hosts":hosts.0,"fileRoot":runtime.data.join("files"),"fixture":hosts.1}))
++}
++async fn windows(app: &AppHandle) -> Result<Value, String> {
++    let (send, receive) = tokio::sync::oneshot::channel();
++    let cloned = app.clone();
++    app.run_on_main_thread(move || {
++        let windows: Vec<Value> = cloned.webview_windows().into_iter().map(|(label, window)| {
++            #[cfg(target_os = "macos")]
++            let number = window.ns_window().ok().map(|pointer| unsafe { (&*(pointer as *const objc2_app_kit::NSWindow)).windowNumber() });
++            #[cfg(not(target_os = "macos"))]
++            let number: Option<i64> = None;
++            json!({"label":label,"number":number,"visible":window.is_visible().unwrap_or(false)})
++        }).collect(); let _ = send.send(json!({"windows":windows}));
++    }).map_err(|error| error.to_string())?;
++    receive.await.map_err(|error| error.to_string())
++}
++#[tauri::command]
++pub(crate) fn debugger_context(app: AppHandle) -> AppResult<Value> {
++    let runtime = app
++        .try_state::<Shared>()
++        .ok_or_else(|| AppError::validation("debugger inactive"))?;
++    Ok(json!({"version":1,"mode":runtime.mode,"runId":runtime.run_id}))
++}
++#[tauri::command]
++pub(crate) fn debugger_poll(app: AppHandle, generation: u64) -> AppResult<Value> {
++    let runtime = app
++        .try_state::<Shared>()
++        .ok_or_else(|| AppError::validation("debugger inactive"))?;
++    let inner = runtime
++        .inner
++        .lock()
++        .map_err(|_| AppError::internal("debugger state poisoned"))?;
++    Ok(
++        json!({"request":if inner.generation > generation { inner.request.clone() } else { None },"action":inner.action}),
++    )
++}
++#[tauri::command]
++pub(crate) fn debugger_ack(
++    app: AppHandle,
++    generation: u64,
++    snapshot: Value,
++    error: Option<String>,
++) -> AppResult<()> {
++    if snapshot.to_string().len() > 128 * 1024 || error.as_ref().is_some_and(|e| e.len() > 4096) {
++        return Err(AppError::validation("debugger snapshot exceeds budget"));
++    }
++    let runtime = app
++        .try_state::<Shared>()
++        .ok_or_else(|| AppError::validation("debugger inactive"))?;
++    let mut inner = runtime
++        .inner
++        .lock()
++        .map_err(|_| AppError::internal("debugger state poisoned"))?;
++    if generation != inner.generation || inner.ready || inner.preparing || inner.request.is_none() {
++        return Err(AppError::validation("stale debugger generation"));
++    }
++    inner.ready = error.is_none();
++    inner.error = error;
++    inner.snapshot = snapshot;
++    Ok(())
++}
++#[tauri::command]
++pub(crate) fn debugger_result(
++    app: AppHandle,
++    generation: u64,
++    id: String,
++    result: Value,
++) -> AppResult<()> {
++    let runtime = app
++        .try_state::<Shared>()
++        .ok_or_else(|| AppError::validation("debugger inactive"))?;
++    let mut inner = runtime
++        .inner
++        .lock()
++        .map_err(|_| AppError::internal("debugger state poisoned"))?;
++    if generation != inner.generation
++        || inner.action.as_ref().and_then(|a| a["id"].as_str()) != Some(&id)
++        || result.to_string().len() > 128 * 1024
++    {
++        return Err(AppError::validation("stale debugger action"));
++    }
++    inner.action = None;
++    inner.result = Some(result);
++    Ok(())
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn rejects_authentication_and_old_protocol() {
++        let token = "a".repeat(64);
++        let mut request = Request {
++            version: 1,
++            id: "test".into(),
++            token: token.clone(),
++            run_id: "run".into(),
++            method: "debug.describe".into(),
++            params: json!({}),
++        };
++        assert!(authenticate(&request, &token, "run").is_ok());
++        request.token = "b".repeat(64);
++        assert!(authenticate(&request, &token, "run").is_err());
++        request.token = token.clone();
++        request.version = 2;
++        assert!(authenticate(&request, &token, "run").is_err());
++    }
++    #[test]
++    fn rejects_invalid_scene_parameters() {
++        let mut p = Parameters {
++            preset: "normal".into(),
++            theme: "dark".into(),
++            locale: "zh-CN".into(),
++            width: 1280,
++            height: 800,
++            count: 24,
++            seed: 42,
++        };
++        assert!(p.validate().is_ok());
++        p.count = 10001;
++        assert!(p.validate().is_err());
++    }
++}
+diff --git a/src/debugger/contracts.ts b/src/debugger/contracts.ts
+new file mode 100644
+index 00000000..78d6efd6
+--- /dev/null
++++ b/src/debugger/contracts.ts
+@@ -0,0 +1,25 @@
++/** Private development contract; never a stable plugin/local API. */
++export interface DebugParameters {
++  preset: "normal" | "empty" | "loading" | "error" | "boundary" | "disabled";
++  theme: "dark" | "light";
++  locale: "zh-CN" | "en-US";
++  width: number;
++  height: number;
++  count: number;
++  seed: number;
++}
++export interface DebugScene {
++  id: string;
++  surface: string;
++  title: string;
++}
++declare global {
++  interface Window {
++    __TUNNELDE_DEBUGGER_MOCK__?: boolean;
++  }
++}
++export const mockEnabled = () =>
++  import.meta.env.DEV &&
++  import.meta.env.VITE_TUNNELDE_DEBUGGER === "1" &&
++  typeof window !== "undefined" &&
++  window.__TUNNELDE_DEBUGGER_MOCK__ === true;
+diff --git a/src/debugger/index.tsx b/src/debugger/index.tsx
+new file mode 100644
+index 00000000..f31aca9e
+--- /dev/null
++++ b/src/debugger/index.tsx
+@@ -0,0 +1,321 @@
++import "@xterm/xterm/css/xterm.css";
++import "@fontsource/ibm-plex-sans/latin-400.css";
++import "@fontsource/jetbrains-mono/latin-400.css";
++import "@/styles/tokens.css";
++import "@/styles/base.css";
++import "@/styles/app.css";
++import "@/styles/workbench.css";
++import "@/styles/plugins.css";
++import "@/styles/settings.css";
++import "@/styles/colors.css";
++import "@/styles/corners.css";
++import "@/i18n/i18n";
++import { registerBackgroundTaskSources } from "@/app/backgroundTaskSources";
++import { useEffect, useState } from "react";
++import { AppShell } from "@/components/layout/AppShell";
++import { useHosts } from "@/store/hosts";
++import { useSsh } from "@/store/ssh";
++import { useEditors } from "@/store/editors";
++import { useWorkspace } from "@/store/workspace";
++import { useNavigation, type BuiltinSidebarView, type SettingsSection } from "@/store/navigation";
++import { useSettings, applySettings } from "@/store/settings";
++import { useDialogs } from "@/store/dialogs";
++import { usePlugins } from "@/store/plugins";
++import { useQuickAccess } from "@/store/quickAccess";
++import { useTransfers } from "@/store/transfers";
++import { useFilePreview } from "@/store/filePreview";
++import { useHostTransfer } from "@/lib/hosts/transfer";
++import { toast } from "@/store/toasts";
++import { Field, Input, Textarea } from "@/components/ui/form/Field";
++import { Button } from "@/components/ui/form/Button";
++import { SwitchRow } from "@/components/ui/form/Switch";
++import { Dialog } from "@/components/ui/overlay/Dialog";
++import { ProcessesDialog } from "@/features/monitor/ProcessesDialog";
++import { EditorConflictDialog } from "@/features/editor/EditorConflictDialog";
++import { initializeFixture, fixtureSnapshot, fixturePlugin } from "./mock";
++import type { DebugParameters, DebugScene } from "./contracts";
++const session = {
++  id: "debug-session",
++  hostId: "00000000-0000-4000-8000-000000000001",
++  title: "验收终端 / Acceptance terminal",
++  address: "tester@fixture.test:22",
++  cols: 100,
++  rows: 30,
++  connectedAt: 1_795_558_400_000,
++  terminal: true,
++};
++export const capabilities = {
++  protocol: 1,
++  rendering: "production-components",
++  targets: ["browser", "native-mock", "native-service"],
++};
++export function snapshot() {
++  return {
++    fixture: fixtureSnapshot(),
++    tabs: useWorkspace.getState().tabs.map((tab) => ({ id: tab.id, kind: tab.kind })),
++    dialog: useDialogs.getState().dialog.kind,
++  };
++}
++let releaseTasks: (() => void) | undefined;
++export async function prepareScene(scene: DebugScene, parameters: DebugParameters) {
++  if (!import.meta.env.DEV || import.meta.env.VITE_TUNNELDE_DEBUGGER !== "1")
++    throw new Error("Development debugger is disabled");
++  window.__TUNNELDE_DEBUGGER_MOCK__ = true;
++  releaseTasks?.();
++  releaseTasks = registerBackgroundTaskSources();
++  const data = initializeFixture(parameters);
++  useWorkspace.setState({
++    tabs: [],
++    panes: [{ id: "main", tabIds: [], activeId: null }],
++    activePaneId: "main",
++    activeId: null,
++    layout: { kind: "pane", paneId: "main" },
++    split: null,
++  });
++  useDialogs.getState().close();
++  useQuickAccess.getState().close();
++  useHosts.setState({
++    hosts: data.hosts,
++    groups: data.groups,
++    loaded: parameters.preset !== "loading",
++    loading: parameters.preset === "loading",
++  });
++  useSsh.setState({
++    sessions: parameters.preset === "empty" ? [] : [session],
++    history: [],
++    connectingHostId: null,
++    connectingHostIds: [],
++    disconnectingSessionIds: [],
++  });
++  useEditors.setState({ entries: {} });
++  useSettings.setState({
++    settings: data.settings,
++    ready: true,
++    error: null,
++    saving: false,
++    info: {
++      name: "Tunnelde",
++      version: "debugger-fixture",
++      tauriVersion: "2",
++      os: "macos",
++      arch: "aarch64",
++      debug: true,
++      dataDir: "/debug",
++      logDir: "/debug/logs",
++      defaultSettings: data.settings,
++      schema: {
++        languages: ["system", "zh-CN", "en-US"],
++        themes: ["dark", "light", "system"],
++        accents: ["blue", "cyan", "green", "orange", "violet"],
++        densities: ["comfortable", "compact"],
++      },
++    },
++  });
++  applySettings(data.settings);
++  useNavigation.setState({
++    activeSidebar: "hosts",
++    sidebarVisible: true,
++    visitedSidebars: ["hosts"],
++    settingsSection: "general",
++  });
++  const plugin = fixturePlugin();
++  usePlugins.setState({
++    items: parameters.preset === "empty" ? [] : [plugin],
++    busy: null,
++    busyIds: [],
++    outputs: {},
++  });
++  useTransfers.setState({
++    items:
++      parameters.preset === "empty"
++        ? []
++        : Array.from({ length: Math.min(parameters.count, 100) }, (_, i) => ({
++            id: `transfer-${i}`,
++            name: `构建产物-${i}.tar.gz`,
++            direction: "transfer" as const,
++            transferred: i * 1024,
++            total: 100 * 1024,
++            status:
++              parameters.preset === "error"
++                ? ("failed" as const)
++                : i % 3 === 0
++                  ? ("paused" as const)
++                  : ("running" as const),
++            error: parameters.preset === "error" ? "模拟传输失败" : null,
++            updatedAt: data.instant,
++          })),
++  });
++  const workspace = useWorkspace.getState();
++  const sidebar: Record<string, BuiltinSidebarView> = {
++    hosts: "hosts",
++    connections: "connections",
++    forwarding: "forwarding",
++    socks: "forwarding",
++    plugins: "plugins",
++    tasks: "tasks",
++    output: "output",
++    "known-hosts": "knownHosts",
++    preview: "filePreview",
++  };
++  if (scene.id === "workbench") {
++    workspace.openFilePane(
++      { ownerSessionId: "local", source: { kind: "local" }, path: "/debug" },
++      "Fixture files",
++    );
++    workspace.openLocalEditor("/debug/README.md");
++    const tab = useWorkspace.getState().tabs.find((tab) => tab.kind === "editor")!;
++    await useEditors.getState().open(tab.id, null, "/debug/README.md");
++    workspace.splitTab(tab.id, "row", "after");
++  } else if (scene.id.startsWith("settings-")) {
++    workspace.openPage("settings");
++    useNavigation.getState().selectSettings(scene.id.slice(9) as SettingsSection);
++  } else if (sidebar[scene.id]) {
++    workspace.ensureWelcome();
++    useNavigation.getState().showSidebar(sidebar[scene.id]!);
++    if (
++      ["hosts", "plugins", "forwarding", "socks"].includes(scene.id) &&
++      data.hosts[0] &&
++      ["forwarding", "socks"].includes(scene.id)
++    )
++      workspace.openHost(data.hosts[0]);
++  } else if (scene.id === "host-details" && data.hosts[0]) workspace.openHost(data.hosts[0]);
++  else if (scene.id === "terminal") workspace.openTerminal(session);
++  else if (scene.id === "files")
++    workspace.openFilePane(
++      { ownerSessionId: "local", source: { kind: "local" }, path: "/debug" },
++      "文件验收",
++    );
++  else if (["editor", "editor-conflict", "floating"].includes(scene.id)) {
++    workspace.openLocalEditor("/debug/README.md");
++    const tab = useWorkspace.getState().tabs.find((tab) => tab.kind === "editor")!;
++    const loading = useEditors.getState().open(tab.id, null, "/debug/README.md");
++    if (parameters.preset !== "loading") await loading;
++    if (scene.id === "floating") workspace.floatTab(tab.id);
++  } else if (scene.id === "monitor" || scene.id === "processes") workspace.openMonitor(session);
++  else if (scene.id === "history") workspace.openHistory(session);
++  else if (scene.id === "plugin-details")
++    workspace.openPluginDetail("local", plugin.id, plugin.name);
++  else if (scene.id === "plugin-view") workspace.openPluginView(plugin.id, "default", "插件视图");
++  else if (scene.id === "about") workspace.openPage("about");
++  else workspace.ensureWelcome();
++  if (scene.id === "connect")
++    useDialogs.getState().openConnect(
++      data.hosts[0] ?? {
++        ...session,
++        id: session.hostId,
++        name: "空态测试主机",
++        host: "fixture.test",
++        port: 22,
++        username: "tester",
++        authMethod: "password",
++        keyPath: null,
++        groupId: null,
++        color: null,
++        favorite: false,
++        tags: [],
++        note: null,
++        sortOrder: 0,
++        lastUsedAt: null,
++        createdAt: data.instant,
++        updatedAt: data.instant,
++      },
++    );
++  if (scene.id === "host-transfer") useHostTransfer.setState({ dialog: { kind: "export" } });
++  if (scene.id === "dialogs")
++    useDialogs.getState().confirm({
++      title: "确认测试操作",
++      body: "这是合成验收场景。操作只会更改当前场景数据。",
++      confirmLabel: "确认",
++      danger: parameters.preset === "error",
++      onConfirm: () => toast("已确认", "success"),
++    });
++  if (scene.id === "menus") useQuickAccess.getState().show(">");
++  if (scene.id === "notifications") {
++    toast("操作已完成 / Operation completed", "success");
++    toast("模拟错误：请检查连接状态", "error");
++  }
++  if (scene.id === "preview") useFilePreview.getState().show("/debug/README.md");
++}
++export function SceneView({
++  scene,
++  parameters,
++  onReady,
++}: {
++  scene: DebugScene;
++  parameters: DebugParameters;
++  onReady?: () => void;
++}) {
++  useEffect(() => {
++    const timer = requestAnimationFrame(() => onReady?.());
++    return () => cancelAnimationFrame(timer);
++  }, [onReady]);
++  const [extraOpen, setExtraOpen] = useState(true);
++  const editor = useWorkspace((state) => state.tabs.find((tab) => tab.kind === "editor")?.id);
++  return (
++    <div data-debug-surface={scene.id} style={{ height: "100vh", width: "100%" }}>
++      <AppShell />
++      {extraOpen && scene.id === "processes" && (
++        <ProcessesDialog sessionId={session.id} onClose={() => setExtraOpen(false)} />
++      )}
++      {extraOpen && scene.id === "editor-conflict" && editor && (
++        <EditorConflictDialog tabId={editor} onClose={() => setExtraOpen(false)} />
++      )}
++      {extraOpen && scene.id === "forms" && (
++        <FixtureForms parameters={parameters} onClose={() => setExtraOpen(false)} />
++      )}
++    </div>
++  );
++}
++function FixtureForms({
++  parameters,
++  onClose,
++}: {
++  parameters: DebugParameters;
++  onClose: () => void;
++}) {
++  const [name, setName] = useState(
++    parameters.preset === "boundary" ? "长表单标签 🚇 ".repeat(15) : "验收主机",
++  );
++  const [enabled, setEnabled] = useState(true);
++  return (
++    <Dialog
++      open
++      title="公共表单控件 / Shared form controls"
++      onClose={onClose}
++      closeLabel="关闭"
++      footer={
++        <>
++          <Button variant="ghost" onClick={onClose}>
++            取消
++          </Button>
++          <Button
++            disabled={parameters.preset === "disabled" || !name}
++            onClick={() => {
++              toast("已保存场景表单", "success");
++              onClose();
++            }}
++          >
++            保存
++          </Button>
++        </>
++      }
++    >
++      <Field
++        label="名称"
++        htmlFor="debug-name"
++        error={parameters.preset === "error" || !name ? "请输入有效名称" : null}
++      >
++        <Input
++          id="debug-name"
++          value={name}
++          disabled={parameters.preset === "disabled"}
++          onChange={(event) => setName(event.target.value)}
++        />
++      </Field>
++      <Field label="备注" htmlFor="debug-note">
++        <Textarea id="debug-note" defaultValue="使用实际生产控件，检查焦点、选区与输入。" />
++      </Field>
++      <SwitchRow label="启用连接" checked={enabled} onChange={setEnabled} />
++    </Dialog>
++  );
++}
+diff --git a/src/debugger/mock.ts b/src/debugger/mock.ts
+new file mode 100644
+index 00000000..bec83b66
+--- /dev/null
++++ b/src/debugger/mock.ts
+@@ -0,0 +1,676 @@
++import { DEFAULT_SETTINGS } from "@/lib/prefs/defaults";
++import type { Host, Group, FileEntry, Settings, PluginInfo } from "@/lib/api/types";
++import type { DebugParameters } from "./contracts";
++const instant = 1_795_558_400_000;
++let parameters: DebugParameters;
++let hosts: Host[] = [];
++let groups: Group[] = [];
++let files: FileEntry[] = [];
++let forwards: Record<string, unknown>[] = [];
++let forwardGroups: Record<string, unknown>[] = [];
++let proxies: Record<string, unknown>[] = [];
++let routes: Record<string, unknown>[] = [];
++let settings: Settings = structuredClone(DEFAULT_SETTINGS);
++const text = new Map<string, string>();
++const subscribers = new Map<string, Set<(payload: unknown) => void>>();
++export function listenFixture(name: string, handler: (payload: unknown) => void) {
++  const set = subscribers.get(name) ?? new Set();
++  set.add(handler);
++  subscribers.set(name, set);
++  return Promise.resolve(() => {
++    set.delete(handler);
++    if (!set.size) subscribers.delete(name);
++  });
++}
++function emit(name: string, payload: unknown) {
++  for (const receive of subscribers.get(name) ?? []) receive(payload);
++}
++function id(index: number) {
++  return `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
++}
++export function initializeFixture(input: DebugParameters) {
++  parameters = input;
++  text.clear();
++  let state = input.seed >>> 0;
++  const random = () => {
++    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
++    return state / 4294967296;
++  };
++  settings = {
++    ...structuredClone(DEFAULT_SETTINGS),
++    theme: input.theme,
++    language: input.locale,
++    autoCheckUpdates: false,
++    restoreWorkspace: false,
++    terminalRenderer: "dom",
++    titleBarStyle: "system",
++    disconnectOnPanelClose: false,
++  };
++  const count =
++    input.preset === "empty"
++      ? 0
++      : input.preset === "boundary"
++        ? Math.max(1000, input.count)
++        : input.count;
++  groups = Array.from({ length: input.preset === "empty" ? 0 : 4 }, (_, i) => ({
++    id: `group-${i}`,
++    name: ["生产环境 Production", "亚洲区 / Asia", "开发环境", "归档 Archive"][i]!,
++    parentId: i === 1 ? "group-0" : i === 3 ? "group-1" : null,
++    sortOrder: i,
++    createdAt: instant,
++    updatedAt: instant,
++  }));
++  hosts = Array.from({ length: count }, (_, i) => ({
++    id: id(i),
++    name:
++      input.preset === "boundary" && i % 3 === 0
++        ? `边界主机-${i} · ${"长名称 Unicode 🚇 日本語 العربية ".repeat(6)}`
++        : `Tunnel-${String(i + 1).padStart(3, "0")}`,
++    host: `192.0.${Math.floor(random() * 254)}.${(i % 250) + 1}`,
++    port: 22,
++    username: i % 2 ? "developer" : "root",
++    authMethod: "password",
++    keyPath: null,
++    groupId: `group-${i % 4}`,
++    favorite: i < 3,
++    color: null,
++    tags: [i % 2 ? "dev" : "production", "synthetic"],
++    note: "合成验收数据 / Synthetic acceptance data",
++    sortOrder: i,
++    lastUsedAt: instant,
++    createdAt: instant,
++    updatedAt: instant,
++  }));
++  files = Array.from({ length: count }, (_, i) => {
++    const name =
++      i === 0
++        ? "README.md"
++        : input.preset === "boundary"
++          ? `文件-${i}-${"长名称🚇".repeat(8)}.ts`
++          : i % 5 === 0
++            ? `directory-${i}`
++            : `source-${i}.ts`;
++    return {
++      name,
++      path: `/debug/${name}`,
++      isDir: i > 0 && i % 5 === 0,
++      size: i * 2048,
++      modified: instant / 1000,
++      permissions: 420,
++      isHidden: false,
++    };
++  });
++  forwards = hosts.slice(0, 12).map((host, i) => ({
++    id: `forward-${i}`,
++    hostId: host.id,
++    name: input.preset === "boundary" ? "长名称转发 🚇 ".repeat(10) : `Web service ${i}`,
++    mode: i % 2 ? "remote" : "local",
++    bindHost: "127.0.0.1",
++    bindPort: 8000 + i,
++    targetHost: "localhost",
++    targetPort: 80 + i,
++    groupId: null,
++    revision: "fixture-1",
++    active: i % 2 === 0,
++    sessionId: i % 2 === 0 ? "debug-session" : null,
++  }));
++  forwardGroups = hosts.slice(0, 4).map((host, i) => ({
++    id: `forward-group-${i}`,
++    hostId: host.id,
++    name: `Forward group ${i}`,
++    revision: "fixture-1",
++  }));
++  proxies = hosts.slice(0, 4).map((host, i) => ({
++    id: `proxy-${i}`,
++    hostId: host.id,
++    name: `SOCKS5 ${i}`,
++    listenHost: "127.0.0.1",
++    listenPort: 1080 + i,
++    authMode: "none",
++    authUsername: "",
++    missPolicy: "remote",
++    autoStart: false,
++    autoRetry: false,
++    revision: "fixture-1",
++  }));
++  routes = proxies.map((group, i) => ({
++    id: `route-${i}`,
++    groupId: group.id,
++    name: `Route ${i}`,
++    mode: "group",
++    matchHost: "*.example.test",
++    matchPort: null,
++    targetHost: "localhost",
++    targetPort: 80,
++    revision: "fixture-1",
++  }));
++  text.set(
++    "/debug/README.md",
++    "# Tunnelde 场景验收\n\n这是生产编辑器中的合成文档。\n\n```ts\nexport const tunnel = '🚇';\n```\n",
++  );
++  return { hosts, groups, settings, files, instant };
++}
++export function fixturePlugin(): PluginInfo {
++  return {
++    id: "debug.fixture",
++    name: "合成插件 / Fixture plugin",
++    version: "1.0.0",
++    apiVersion: 1,
++    description: "开发场景示例；不执行外部插件代码。",
++    commands: [{ id: "fixture.submit", title: "提交验收表单" }],
++    views: [{ id: "default", title: "合成插件视图", kind: "blocks", location: "workspace" }],
++    permissions: [],
++    status: parameters.preset === "error" ? "failed" : "running",
++    error: parameters.preset === "error" ? "模拟插件错误" : null,
++    runtimeId: "fixture-runtime",
++    fingerprint: "fixture-v1",
++    path: "/debug/plugins",
++    runtime: "declarative",
++  };
++}
++export function fixtureSnapshot() {
++  return {
++    preset: parameters.preset,
++    hosts: hosts.length,
++    files: files.length,
++    settings: { theme: settings.theme, language: settings.language },
++    subscribers: [...subscribers.entries()].map(([name, set]) => ({ name, count: set.size })),
++  };
++}
++export async function invokeFixture<T>(
++  command: string,
++  args: Record<string, unknown> = {},
++): Promise<T> {
++  if (!parameters) throw new Error("Debugger fixture was not initialized");
++  const error = () => {
++    throw { code: "io", message: "模拟故障：连接不可用 / Injected unavailable connection" };
++  };
++  const dataRead =
++    /^(local_list|sftp_list|remote_stats|history_list|known_hosts_list|forwarding_list|forwarding_groups_list|proxy_groups_list|proxy_routes_list|proxy_runtime_list|logs_output_read|local_read_text|sftp_read_text|remote_processes|processes_snapshot)$/.test(
++      command,
++    );
++  if (dataRead && parameters.preset === "error") error();
++  if (dataRead && parameters.preset === "loading") return new Promise<T>(() => {});
++  let value: unknown;
++  switch (command) {
++    case "settings_get":
++      value = settings;
++      break;
++    case "settings_update":
++      settings = { ...settings, ...(args.patch as Partial<Settings>) };
++      value = settings;
++      emit("settings://changed", settings);
++      break;
++    case "settings_reset":
++      settings = structuredClone(DEFAULT_SETTINGS);
++      value = settings;
++      break;
++    case "app_info":
++      value = {
++        name: "Tunnelde",
++        version: "debugger-fixture",
++        tauriVersion: "2",
++        os: "macos",
++        arch: "aarch64",
++        debug: true,
++        dataDir: "/debug",
++        logDir: "/debug/logs",
++        defaultSettings: DEFAULT_SETTINGS,
++        schema: {},
++        systemLanguages: [parameters.locale],
++      };
++      break;
++    case "hosts_snapshot":
++      value = { hosts, groups };
++      break;
++    case "host_create": {
++      const host = {
++        ...hosts[0],
++        id: crypto.randomUUID(),
++        createdAt: instant,
++        updatedAt: instant,
++        sortOrder: hosts.length,
++        tags: [],
++        groupId: null,
++        note: null,
++        favorite: false,
++        color: null,
++        keyPath: null,
++        lastUsedAt: null,
++        port: 22,
++        username: "root",
++        authMethod: "password",
++        ...(args.input as object),
++      } as Host;
++      hosts.push(host);
++      value = host;
++      break;
++    }
++    case "host_update":
++      hosts = hosts.map((host) =>
++        host.id === args.id ? { ...host, ...(args.input as object) } : host,
++      );
++      value = hosts.find((host) => host.id === args.id);
++      break;
++    case "host_delete":
++      hosts = hosts.filter((host) => host.id !== args.id);
++      break;
++    case "host_editor_save": {
++      const edit = args.edit as { id: string | null; input: object };
++      const host = edit.id
++        ? await invokeFixture<Host>("host_update", { id: edit.id, input: edit.input })
++        : await invokeFixture<Host>("host_create", { input: edit.input });
++      value = { host, credentialError: null };
++      break;
++    }
++    case "group_create": {
++      const group = {
++        id: crypto.randomUUID(),
++        parentId: null,
++        sortOrder: groups.length,
++        createdAt: instant,
++        updatedAt: instant,
++        ...(args.input as object),
++      } as Group;
++      groups.push(group);
++      value = group;
++      break;
++    }
++    case "group_update":
++      groups = groups.map((group) =>
++        group.id === args.id ? { ...group, ...(args.input as object) } : group,
++      );
++      value = groups.find((group) => group.id === args.id);
++      break;
++    case "group_delete":
++      groups = groups.filter((group) => group.id !== args.id);
++      break;
++    case "connection_review_prepare":
++      value = {
++        review: { hostId: (args.displayed as Host).id, revision: "fixture-1" },
++        jumpHosts: [],
++      };
++      break;
++    case "connection_review_probe":
++      value = {
++        hostId: (args.review as { hostId: string }).hostId,
++        fingerprint: "SHA256:synthetic-test-fingerprint",
++        algorithm: "ssh-ed25519",
++        status: "unknown",
++        knownFingerprint: null,
++      };
++      break;
++    case "connection_review_trust":
++      value = {
++        info: {
++          hostId: (args.review as { hostId: string }).hostId,
++          fingerprint: args.fingerprint,
++          algorithm: "ssh-ed25519",
++          status: "known",
++          knownFingerprint: null,
++        },
++        review: args.review,
++      };
++      break;
++    case "connection_review_connect":
++    case "ssh_connect":
++      value = {
++        id: "debug-session",
++        hostId: (args.request as { hostId: string }).hostId,
++        title: "Fixture terminal",
++        address: "debugger@fixture.test:22",
++        cols: 100,
++        rows: 30,
++        connectedAt: instant,
++        terminal: true,
++      };
++      break;
++    case "connection_review_credential":
++      value = null;
++      break;
++    case "remote_processes":
++      value = Array.from(
++        { length: parameters.preset === "empty" ? 0 : parameters.count },
++        (_, i) => ({
++          pid: i + 100,
++          name: i === 0 ? "Tunnelde fixture 🚇" : `worker-${i}`,
++          cpu: i % 100,
++          memory: i % 70,
++          rss: i * 1024 * 1024,
++          userName: "debugger",
++          state: "S",
++          threads: 4,
++        }),
++      );
++      break;
++    case "connection_route_get":
++      value = { jumpHosts: [], proxy: { kind: "direct" } };
++      break;
++    case "credential_status":
++      value = false;
++      break;
++    case "ssh_probe":
++    case "ssh_trust":
++      value = {
++        hostId: args.hostId,
++        fingerprint: "SHA256:synthetic-test-fingerprint",
++        algorithm: "ssh-ed25519",
++        status: command === "ssh_trust" ? "known" : "unknown",
++        knownFingerprint: null,
++      };
++      break;
++    case "ssh_sessions":
++      value = [];
++      break;
++    case "ssh_write": {
++      emit("ssh://data", { sessionId: args.sessionId, data: args.data, sequence: instant });
++      break;
++    }
++    case "local_home":
++    case "sftp_home":
++    case "sftp_realpath":
++    case "local_resolve_path":
++      value = "/debug";
++      break;
++    case "local_list":
++    case "sftp_list":
++      value = {
++        path: String(args.path ?? "/debug"),
++        entries: files.map((file) => ({
++          ...file,
++          path: `${String(args.path ?? "/debug").replace(/\/$/, "")}/${file.name}`,
++        })),
++      };
++      break;
++    case "local_read_text":
++    case "sftp_read_text":
++    case "search_preview_local": {
++      const content = text.get(String(args.path)) ?? "export const scenario = 'Tunnelde';\n";
++      value = {
++        content,
++        size: new TextEncoder().encode(content).length,
++        encoding: "utf-8",
++        bom: false,
++      };
++      break;
++    }
++    case "local_write_text":
++    case "sftp_write_text":
++      text.set(String(args.path), String(args.content));
++      break;
++    case "local_mkdir":
++    case "sftp_mkdir":
++    case "local_create_file":
++    case "sftp_create_file": {
++      const path = String(args.path);
++      files.push({
++        name: path.split("/").at(-1)!,
++        path,
++        isDir: command.endsWith("mkdir"),
++        size: 0,
++        modified: instant / 1000,
++        permissions: 420,
++        isHidden: false,
++      });
++      break;
++    }
++    case "local_delete":
++    case "sftp_delete":
++      files = files.filter((file) => file.path !== args.path);
++      break;
++    case "remote_stats":
++      value = {
++        cpuPercent: parameters.preset === "boundary" ? 100 : 32,
++        cpuCount: 8,
++        memoryUsed: 6e9,
++        memoryTotal: 16e9,
++        swapUsed: 0,
++        swapTotal: 4e9,
++        diskUsed: 128e9,
++        diskTotal: 512e9,
++        load: [1.2, 0.8, 0.5],
++        uptime: 86400,
++        netRxRate: 65536,
++        netTxRate: 32768,
++        diskReadRate: 0,
++        diskWriteRate: 0,
++        sampledAt: instant,
++        processes: [],
++      };
++      break;
++    case "history_list":
++      value = Array.from(
++        { length: parameters.preset === "empty" ? 0 : parameters.count },
++        (_, i) => ({
++          id: i + 1,
++          hostId: hosts[0]?.id,
++          sessionId: "debug-session",
++          command: `echo '场景 ${i}'`,
++          executedAt: instant - i * 1000,
++          at: instant - i * 1000,
++          createdAt: instant - i * 1000,
++        }),
++      );
++      break;
++    case "known_hosts_list":
++      value = hosts.slice(0, 20).map((host) => ({
++        host: host.host,
++        port: host.port,
++        fingerprint: "SHA256:synthetic-test-fingerprint",
++        algorithm: "ssh-ed25519",
++        updatedAt: instant,
++        createdAt: instant,
++      }));
++      break;
++    case "logs_output_read":
++      value = {
++        diagnostic:
++          parameters.preset === "empty"
++            ? ""
++            : Array.from(
++                { length: parameters.count },
++                (_, i) => `[INFO] Scenario event ${i} · 合成诊断数据`,
++              ).join("\n"),
++        operations: [],
++        cursor: { filename: "debug.jsonl", offset: 0, operationId: 0 },
++        truncated: false,
++      };
++      break;
++    case "logs_read":
++      value = {
++        diagnostic: "Synthetic scenario log",
++        operations: [],
++        filename: null,
++        truncated: false,
++      };
++      break;
++    case "update_state":
++    case "update_check":
++      value = {
++        phase: parameters.preset === "error" ? "error" : "upToDate",
++        currentVersion: "0.1.0",
++        channel: "stable",
++        source: "github",
++        sourceUrl: "",
++        version: null,
++        notes: null,
++        publishedAt: null,
++        progress: null,
++        contentLength: null,
++        error: parameters.preset === "error" ? "模拟更新错误" : null,
++        lastChecked: instant,
++        available: false,
++        autoInstall: false,
++        unsupportedReason: null,
++        downloadUrl: null,
++        skipped: false,
++      };
++      break;
++    case "plugin_render_view":
++      value = {
++        title: "合成插件视图 / Fixture plugin view",
++        blocks: [
++          { type: "heading", text: "已登记的插件扩展" },
++          { type: "text", text: "复用生产声明式插件渲染器；此场景不执行第三方代码。" },
++          {
++            type: "table",
++            columns: ["Key", "Value"],
++            rows: [
++              ["Seed", String(parameters.seed)],
++              ["Locale", parameters.locale],
++            ],
++          },
++          {
++            type: "form",
++            id: "acceptance",
++            fields: [
++              {
++                id: "name",
++                type: "text",
++                label: "场景名称",
++                value: "Fixture",
++                placeholder: "",
++                options: [],
++              },
++            ],
++            actions: [{ id: "submit", label: "提交", command: "fixture.submit" }],
++          },
++        ],
++      };
++      break;
++    case "plugin_run":
++      if (args.command !== "fixture.submit") throw new Error("Unregistered fixture plugin command");
++      value = { text: "已完成合成插件操作", title: "Fixture result", error: false };
++      break;
++    case "plugin_list":
++    case "plugins_list":
++      value = parameters.preset === "empty" ? [] : [fixturePlugin()];
++      break;
++    case "plugin_security":
++    case "plugin_security_state":
++      value = { restricted: true, grants: [], reviews: [], disabled: [] };
++      break;
++    case "plugin_node_info":
++    case "node_runtime_info":
++      value = {
++        available: false,
++        version: null,
++        path: null,
++        source: null,
++        consent: false,
++        installing: false,
++      };
++      break;
++    case "settings_profiles_snapshot":
++      value = { profiles: [], revision: "fixture-1" };
++      break;
++    case "habits_snapshot":
++      value = { revision: "fixture-1", enabled: true, categories: {}, entries: [] };
++      break;
++    case "storage_status":
++      value = { categories: [], pending: null, root: "/debug" };
++      break;
++    case "fonts_catalogue":
++      value = { version: 1, items: [] };
++      break;
++    case "plugin_config":
++      value = { sources: [], nodePath: null };
++      break;
++    case "plugin_market_catalogue":
++      value = { plugins: [], sources: [], errors: [] };
++      break;
++    case "forwarding_list":
++      value = forwards;
++      break;
++    case "forwarding_groups_list":
++      value = forwardGroups;
++      break;
++    case "forwarding_save": {
++      const rule: Record<string, unknown> = {
++        ...(args.rule as object),
++        revision: crypto.randomUUID(),
++        active: false,
++        sessionId: null,
++      };
++      forwards = [...forwards.filter((item) => item.id !== rule.id), rule];
++      value = rule;
++      break;
++    }
++    case "forwarding_remove":
++      forwards = forwards.filter((item) => item.id !== args.id);
++      break;
++    case "proxy_groups_list":
++      value = proxies.filter((group) => group.hostId === args.hostId);
++      break;
++    case "proxy_routes_list":
++      value = routes.filter((route) => route.groupId === args.groupId);
++      break;
++    case "proxy_group_save": {
++      const group: Record<string, unknown> = {
++        ...(args.group as object),
++        revision: crypto.randomUUID(),
++      };
++      proxies = [...proxies.filter((item) => item.id !== group.id), group];
++      value = group;
++      break;
++    }
++    case "proxy_group_remove":
++      proxies = proxies.filter((item) => item.id !== args.id);
++      break;
++    case "proxy_route_save": {
++      const route: Record<string, unknown> = {
++        ...(args.route as object),
++        revision: crypto.randomUUID(),
++      };
++      routes = [...routes.filter((item) => item.id !== route.id), route];
++      value = route;
++      break;
++    }
++    case "proxy_connections_list":
++      value = [];
++      break;
++    case "proxy_runtime_list":
++      value = [];
++      break;
++    case "ssh_forward_list":
++    case "market_sources":
++    case "settings_profiles_list":
++    case "tabs_snapshot":
++    case "durable_transfer_list":
++    case "editor_cleanup_list":
++    case "runner_recovery_owners":
++    case "plugin_host_sources":
++    case "plugin_host_columns":
++    case "plugin_status_bar":
++    case "plugin_tab_bar":
++      value = [];
++      break;
++    case "host_fields_get":
++      value = { schema: { fields: [] }, values: {}, revision: 0 };
++      break;
++    case "ssh_attach":
++      value = null;
++      break;
++    case "ssh_detach":
++      value = 0;
++      break;
++    case "ssh_resize":
++    case "ssh_disconnect":
++    case "tabs_save":
++    case "host_mark_used":
++    case "hosts_reorder":
++    case "set_locale":
++    case "history_record":
++    case "logs_report":
++    case "plugin_log":
++    case "file_preview_close":
++      value = null;
++      break;
++    default:
++      throw {
++        code: "validation",
++        message: `调试场景未实现此操作 / Unsupported fixture operation: ${command}`,
++      };
++  }
++  return structuredClone(value) as T;
++}
+diff --git a/src/debugger/native.tsx b/src/debugger/native.tsx
+new file mode 100644
+index 00000000..e6bbe182
+--- /dev/null
++++ b/src/debugger/native.tsx
+@@ -0,0 +1,338 @@
++/** Development-only document entry. Commands remain coordinator scoped. */
++import { useEffect, useState } from "react";
++import { EditorView } from "@codemirror/view";
++import { invoke } from "@tauri-apps/api/core";
++import { emitTo, listen } from "@tauri-apps/api/event";
++import { App } from "@/App";
++import { SatelliteApp } from "@/app/SatelliteApp";
++import { bootstrap } from "@/app/bootstrap";
++import { useHosts } from "@/store/hosts";
++import { useSettings } from "@/store/settings";
++import { useNavigation, type SettingsSection } from "@/store/navigation";
++import { useWorkspace } from "@/store/workspace";
++import { useEditors } from "@/store/editors";
++import { useSsh } from "@/store/ssh";
++import { api } from "@/lib/api/ipc";
++import { mainPanelWindowClient } from "@/app/panelWindows";
++import { movePanelToWindow } from "@/lib/panels/windowMoves";
++import { canonicalWorkspacePanelId } from "@/features/editor/editorWindowRegistration";
++import type { Host } from "@/lib/api/types";
++import type { DebugParameters } from "./contracts";
++import { prepareScene, SceneView, snapshot } from "./index";
++interface Request {
++  generation: number;
++  scenarioId: string;
++  parameters: DebugParameters;
++  mode: string;
++  prepared: { hosts?: Host[]; fileRoot?: string; fixture?: { password: string; port: number } };
++}
++const message = (cause: unknown) =>
++  cause instanceof Error
++    ? cause.message
++    : typeof cause === "object" && cause && "message" in cause
++      ? String(cause.message)
++      : String(cause);
++const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
++async function prepareReal(request: Request) {
++  await bootstrap();
++  await Promise.all([useHosts.getState().load(), useSettings.getState().load()]);
++  const { scenarioId: id, prepared } = request;
++  const workspace = useWorkspace.getState();
++  if (id.startsWith("settings-")) {
++    workspace.openPage("settings");
++    useNavigation.getState().selectSettings(id.slice(9) as SettingsSection);
++  } else if (id === "hosts") {
++    workspace.ensureWelcome();
++    useNavigation.getState().showSidebar("hosts");
++  } else if (id === "host-details" && prepared.hosts?.[0]) workspace.openHost(prepared.hosts[0]);
++  else if (["editor", "floating"].includes(id)) {
++    const path = `${prepared.fileRoot}/README.md`;
++    workspace.openLocalEditor(path);
++    const tab = useWorkspace.getState().tabs.find((tab) => tab.kind === "editor")!;
++    await useEditors.getState().open(tab.id, null, path);
++    if (id === "floating") useWorkspace.getState().floatTab(tab.id);
++  } else if (id === "terminal" || id === "files") {
++    const host = prepared.hosts?.[0];
++    if (!host || !prepared.fixture) throw new Error("SSH fixture requires at least one host");
++    const key = await api.sshProbe(host.id);
++    await api.sshTrust(host.id, key.fingerprint);
++    const session = await useSsh
++      .getState()
++      .connect({ hostId: host.id, password: prepared.fixture.password, cols: 100, rows: 30 });
++    if (!session) throw new Error("Controlled SSH connection failed");
++    if (id === "terminal") workspace.openTerminal(session);
++    else {
++      // Both panes start in fixture-owned roots; never enumerate the user's home.
++      workspace.openFilePane(
++        { source: { kind: "local" }, path: prepared.fileRoot!, ownerSessionId: "local" },
++        "Local fixture",
++      );
++      const remote = workspace.openFilePane(
++        {
++          source: { kind: "remote", sessionId: session.id },
++          path: "/",
++          ownerSessionId: session.id,
++          remoteIdentity: { hostId: host.id, address: session.address },
++        },
++        "SFTP fixture",
++      );
++      useWorkspace.getState().splitTab(remote, "row", "after");
++    }
++  } else workspace.ensureWelcome();
++}
++function editorView() {
++  const node = document.querySelector<HTMLElement>(".cm-editor");
++  return node ? EditorView.findFromDOM(node) : null;
++}
++function editorSelection() {
++  const range = editorView()?.state.selection.main;
++  return range ? { anchor: range.anchor, head: range.head } : null;
++}
++function realSnapshot() {
++  return {
++    tabs: useWorkspace.getState().tabs.map(({ id, kind, filePane }) => ({ id, kind, filePane })),
++    hosts: useHosts.getState().hosts.length,
++    sessions: useSsh.getState().sessions.map(({ id, hostId }) => ({ id, hostId })),
++    theme: useSettings.getState().settings.theme,
++    locale: useSettings.getState().settings.language,
++    editors: Object.entries(useEditors.getState().entries).map(([id, entry]) => ({
++      id,
++      loading: entry.loading,
++      error: entry.error,
++      dirty: entry.content !== entry.baseline,
++      draftFingerprint: Array.from(entry.content).reduce(
++        (hash, char) => Math.imul(hash ^ char.codePointAt(0)!, 16777619) >>> 0,
++        2166136261,
++      ),
++      selection: editorSelection(),
++    })),
++  };
++}
++async function verifyReal() {
++  const checks: string[] = [];
++  const input = {
++    name: "Debugger verification host",
++    host: "example.test",
++    username: "debugger",
++    authMethod: "password" as const,
++    tags: ["synthetic"],
++  };
++  const host = await api.createHost(input);
++  await api.updateHost(host.id, { ...input, name: "Updated verification host" });
++  await useHosts.getState().load();
++  if (
++    useHosts.getState().hosts.find((item) => item.id === host.id)?.name !==
++    "Updated verification host"
++  )
++    throw new Error("Host service/store mismatch");
++  await api.deleteHost(host.id);
++  await useHosts.getState().load();
++  checks.push("host create/update/read/delete");
++  const settings = await api.settings();
++  await api.updateSettings({ theme: settings.theme === "dark" ? "light" : "dark" });
++  await useSettings.getState().load();
++  if (useSettings.getState().settings.theme === settings.theme)
++    throw new Error("Settings service/store mismatch");
++  await api.updateSettings({ theme: settings.theme });
++  await useSettings.getState().load();
++  checks.push("settings write/read/restore");
++  const entry = Object.values(useEditors.getState().entries)[0];
++  if (entry) {
++    const content = entry.content + "\nNative verification 🚇\n";
++    useEditors.getState().change(entry.tabId, content);
++    if (!(await useEditors.getState().save(entry.tabId))) throw new Error("Editor save failed");
++    if ((await api.localReadText(entry.path)).content !== content)
++      throw new Error("Editor/backend file mismatch");
++    useEditors.getState().change(entry.tabId, content + "Unsaved round-trip draft", {
++      start: 2,
++      end: 7,
++      direction: "forward",
++      scrollTop: 0,
++      scrollLeft: 0,
++    });
++    await delay(200);
++    editorView()?.dispatch({ selection: { anchor: 2, head: 7 } });
++    checks.push("local editor save/read and pending draft");
++  }
++  const session = useSsh.getState().sessions[0];
++  if (session) {
++    await api.sshWrite(session.id, btoa("debugger-input\r"));
++    await api.sftpList(session.id, "/");
++    const name = `/check-${crypto.randomUUID()}.txt`;
++    await api.sftpCreateFile(session.id, name);
++    await api.sftpWriteText(session.id, name, "SSH/SFTP acceptance 🚇", "", "utf-8", false);
++    if ((await api.sftpReadText(session.id, name)).content !== "SSH/SFTP acceptance 🚇")
++      throw new Error("SFTP write/read mismatch");
++    await api.sftpDelete(session.id, name, false);
++    if (!(await api.sshSessions()).some((item) => item.id === session.id))
++      throw new Error("SSH session was replaced");
++    checks.push("SSH terminal input; same-session SFTP create/write/read/delete");
++  }
++  return { checks, state: realSnapshot() };
++}
++async function present(placement: string) {
++  const client = mainPanelWindowClient();
++  if (!client) throw new Error("Native ownership coordinator unavailable");
++  const tabs = useWorkspace.getState().tabs;
++  const tab =
++    tabs.find((tab) => tab.filePane?.source.kind === "remote") ??
++    tabs.find((tab) => ["editor", "terminal", "sftp", "files", "host", "page"].includes(tab.kind));
++  if (!tab) throw new Error("No registered movable page");
++  const panelId = canonicalWorkspacePanelId(tab.id);
++  if (placement === "floating") {
++    useWorkspace.getState().floatTab(tab.id);
++    return { placement, panelId };
++  }
++  const state = await client.snapshot();
++  const lease = state.panels.find((item) => item.panelId === panelId);
++  if (!lease) throw new Error("Panel has not registered ownership yet");
++  if (placement === "native") await movePanelToWindow(panelId);
++  else if (lease.windowId !== "main") {
++    const id = crypto.randomUUID();
++    await emitTo(lease.windowId, "debugger://return", { id, panelId });
++    const deadline = Date.now() + 25000;
++    while (Date.now() < deadline) {
++      const snapshot = await client.snapshot();
++      if (snapshot.panels.some((panel) => panel.panelId === panelId && panel.windowId === "main"))
++        break;
++      await delay(100);
++    }
++  }
++  const result = await client.snapshot();
++  const owner = result.panels.find((item) => item.panelId === panelId);
++  if (!owner || (placement === "native" ? owner.windowId === "main" : owner.windowId !== "main"))
++    throw new Error("Window ownership did not commit");
++  if (placement === "main" && tab.kind === "editor") {
++    const deadline = Date.now() + 10000;
++    while (
++      (!editorView() ||
++        Object.values(useEditors.getState().entries).some((entry) => entry.loading)) &&
++      Date.now() < deadline
++    )
++      await delay(50);
++  }
++  return { placement, owner, windows: result.windows, state: realSnapshot() };
++}
++export function NativeEntry() {
++  const [request, setRequest] = useState<Request>();
++  const [mode, setMode] = useState("");
++  const [error, setError] = useState("");
++  useEffect(() => {
++    let disposed = false;
++    let generation = 0;
++    const start = async () => {
++      const context = await invoke<{ mode: string }>("debugger_context");
++      if (disposed) return;
++      setMode(context.mode);
++      while (!disposed) {
++        const polled = await invoke<{
++          request?: Request;
++          action?: { id: string; generation: number; placement: string };
++        }>("debugger_poll", { generation });
++        if (disposed) break;
++        if (polled.request) {
++          const next = polled.request;
++          // A new mock document tears down all subscriptions and singleton caches.
++          if (generation > 0 && context.mode === "native-mock") {
++            location.reload();
++            return;
++          }
++          generation = next.generation;
++          try {
++            if (context.mode === "native-mock")
++              await prepareScene(
++                { id: next.scenarioId, surface: next.scenarioId, title: next.scenarioId },
++                next.parameters,
++              );
++            else await prepareReal(next);
++            if (disposed) return;
++            setRequest(next);
++            await invoke("main_window_ready");
++          } catch (cause) {
++            const detail = message(cause);
++            setError(detail);
++            await invoke("debugger_ack", { generation, snapshot: {}, error: detail });
++            await invoke("main_window_ready");
++          }
++        }
++        if (polled.action) {
++          const action = polled.action;
++          let result;
++          try {
++            result = {
++              ok: true,
++              ...(await (action.placement === "verify"
++                ? context.mode === "native-mock"
++                  ? Promise.resolve({ state: snapshot(), checks: ["production mock mounted"] })
++                  : verifyReal()
++                : present(action.placement))),
++            };
++          } catch (cause) {
++            result = { ok: false, error: message(cause) };
++          }
++          await invoke("debugger_result", { generation, id: action.id, result });
++        }
++        await delay(150);
++      }
++    };
++    void start().catch((cause) => {
++      if (!disposed) setError(message(cause));
++    });
++    return () => {
++      disposed = true;
++    };
++  }, []);
++  useEffect(() => {
++    if (!request) return;
++    let cancelled = false;
++    // A timer also works while a hidden WebKit document throttles animation frames.
++    const timer = setTimeout(() => {
++      if (cancelled) return;
++      const alert = document.querySelector('[role="alert"]');
++      void invoke("debugger_ack", {
++        generation: request.generation,
++        snapshot: mode === "native-mock" ? snapshot() : realSnapshot(),
++        error: alert?.textContent || null,
++      });
++    }, 350);
++    return () => {
++      cancelled = true;
++      clearTimeout(timer);
++    };
++  }, [request, mode]);
++  if (error) return <pre role="alert">{error}</pre>;
++  if (mode === "native-service") return <App />;
++  return request ? (
++    <SceneView
++      key={request.generation}
++      scene={{ id: request.scenarioId, surface: request.scenarioId, title: request.scenarioId }}
++      parameters={request.parameters}
++    />
++  ) : (
++    <div role="status">Waiting for debugger scenario…</div>
++  );
++}
++export function DebugSatelliteEntry() {
++  useEffect(() => {
++    let disposed = false;
++    let stop: (() => void) | undefined;
++    void listen<{ id: string; panelId: string }>("debugger://return", async ({ payload }) => {
++      if (disposed) return;
++      let error: string | undefined;
++      try {
++        await movePanelToWindow(payload.panelId, "main");
++      } catch (cause) {
++        error = message(cause);
++      }
++      if (error) console.error("debugger window return:", error);
++    }).then((unlisten) => {
++      if (disposed) unlisten();
++      else stop = unlisten;
++    });
++    return () => {
++      disposed = true;
++      stop?.();
++    };
++  }, []);
++  return <SatelliteApp />;
++}
+diff --git a/src/debugger/storage.ts b/src/debugger/storage.ts
+new file mode 100644
+index 00000000..a3a44cc9
+--- /dev/null
++++ b/src/debugger/storage.ts
+@@ -0,0 +1,19 @@
++/** One in-memory preference namespace per rendering document. */
++export function isolateStorage() {
++  const items = new Map<string, string>();
++  const storage: Storage = {
++    get length() {
++      return items.size;
++    },
++    clear: () => items.clear(),
++    key: (index) => [...items.keys()][index] ?? null,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(String(key), String(value));
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++  Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
++}

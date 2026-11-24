@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TunneldeDebugger",
+  "version": "0.1.0",
+  "identifier": "dev.tunnelde.debugger",
+  "build": {
+    "devUrl": "http://127.0.0.1:4760",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TunneldeDebugger \u00b7 \u5f00\u53d1\u4e0e\u9a8c\u6536",
+        "width": 1560,
+        "height": 1000,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4760; frame-src http://127.0.0.1:4761; img-src 'self' data: http://127.0.0.1:4760; style-src 'self' 'unsafe-inline'",
+      "capabilities": [],
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://127.0.0.1:4760 ws://127.0.0.1:4763; frame-src http://127.0.0.1:4761; img-src 'self' data: http://127.0.0.1:4760; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

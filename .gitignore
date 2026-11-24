@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.tunnelde-debugger/
+test-results/
+playwright-report/
+src-tauri/target/
+.DS_Store
+*.log
+src-tauri/gen/

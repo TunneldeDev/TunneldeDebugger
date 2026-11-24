@@ -1,0 +1,42 @@
+{
+  "name": "tunnelde-debugger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "tsx server/main.ts",
+    "desktop": "tsx scripts/desktop.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:browser": "playwright test",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "build": "vite build",
+    "tauri": "tauri",
+    "acceptance:native": "tsx scripts/native-acceptance.ts",
+    "setup:target": "tsx scripts/setup-target.ts",
+    "acceptance:runners": "tsx scripts/verify-runners.ts",
+    "verify:production": "tsx scripts/check-production.ts",
+    "docs:coverage": "tsx scripts/generate-coverage.ts"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "lucide-react": "1.77.0",
+    "vite": "7.3.8",
+    "@vitejs/plugin-react": "5.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@tauri-apps/cli": "2.12.6",
+    "@types/node": "^24.0.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tsx": "^4.20.0",
+    "typescript": "5.9.3"
+  }
+}
