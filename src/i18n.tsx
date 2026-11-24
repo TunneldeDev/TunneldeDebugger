@@ -298,15 +298,16 @@ export function localize(
   node: ReactNode,
   locale: "zh-CN" | "en-US",
 ): ReactNode {
-  if (locale === "zh-CN") return node;
-  if (typeof node === "string") return translate(node);
+  // Keep the same React child/key structure in both locales, including iframe hosts.
+  if (typeof node === "string")
+    return locale === "en-US" ? translate(node) : node;
   if (Array.isArray(node))
     return Children.map(node, (child) => localize(child, locale));
   if (!isValidElement(node)) return node;
   const element = node as ReactElement<Record<string, unknown>>;
   const props: Record<string, unknown> = {};
   for (const key of ["title", "body", "placeholder", "aria-label", "alt"])
-    if (typeof element.props[key] === "string")
+    if (locale === "en-US" && typeof element.props[key] === "string")
       props[key] = translate(element.props[key] as string);
   if (element.props.children !== undefined)
     props.children = Children.map(

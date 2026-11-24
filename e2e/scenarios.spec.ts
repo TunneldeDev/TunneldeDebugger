@@ -80,11 +80,18 @@ test("narrow disabled forms preserve focus and contain their layout", async ({
   const dialog = await frame.getByRole("dialog").boundingBox();
   expect(dialog!.width).toBeLessThanOrEqual(420);
 });
-test("workbench language does not change the independent scene locale", async ({
+test("workbench language preserves the scene locale, input and fitted iframe", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 900, height: 800 });
   await page.goto("/?scene=forms");
   await expect(page.getByTestId("scene-ready")).toBeVisible();
+  const input = page.frameLocator("iframe").getByLabel("名称", { exact: true });
+  await input.fill("Keep this draft across languages");
+  const originalFrame = await page.locator("iframe").elementHandle();
+  const originalScale = await page.locator(".frame-container").evaluate(
+    (element) => getComputedStyle(element).transform,
+  );
   await selectOption(page.getByLabel("Workbench language"), "en-US");
   await expect(
     page.getByRole("button", { name: "Export report", exact: true }),
@@ -93,9 +100,13 @@ test("workbench language does not change the independent scene locale", async ({
     "value",
     "zh-CN",
   );
-  await expect(
-    page.frameLocator("iframe").getByLabel("名称", { exact: true }),
-  ).toBeVisible();
+  await expect(input).toHaveValue("Keep this draft across languages");
+  expect(await originalFrame!.evaluate((element) => element.isConnected)).toBe(true);
+  await expect(page.locator(".frame-container")).toHaveCSS("transform", originalScale);
+  await selectOption(page.getByLabel("Workbench language"), "zh-CN");
+  await expect(input).toHaveValue("Keep this draft across languages");
+  expect(await originalFrame!.evaluate((element) => element.isConnected)).toBe(true);
+  await expect(page.locator(".frame-container")).toHaveCSS("transform", originalScale);
 });
 for (const preset of ["empty", "loading", "error", "boundary"] as const) {
   test(`file state ${preset} can be reset without stale results`, async ({
