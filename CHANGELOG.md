@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- Citation metadata in `CITATION.cff`, a bilingual support guide, repository code owners, CodeQL analysis and pull-request dependency review.
+
+### Changed
+
+- Migrated the development servers from the deprecated Vite HMR options to `server.ws`.
+
 ## [0.1.0] - 2026-11-25
 
 ### Added

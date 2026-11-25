@@ -3,12 +3,14 @@
 [简体中文](README.md)
 
 [![Desktop checks](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml/badge.svg)](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml)
+[![CodeQL](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/codeql.yml/badge.svg)](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/codeql.yml)
 [![Release](https://img.shields.io/github/v/release/TunneldeDev/TunneldeDebugger?label=release)](https://github.com/TunneldeDev/TunneldeDebugger/releases/latest)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+[![Citation File Format](https://img.shields.io/badge/citation-CFF%201.2-success.svg)](CITATION.cff)
 [![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-5FA04E?logo=node.js&logoColor=white)](package.json)
 [![pnpm 10+](https://img.shields.io/badge/pnpm-10%2B-F69220?logo=pnpm&logoColor=white)](package.json)
 
-[Guide](docs/en-us/guide.md) · [Coverage and validation](docs/en-us/validation.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+[Guide](docs/en-us/guide.md) · [Coverage and validation](docs/en-us/validation.md) · [Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Cite](CITATION.cff) · [Changelog](CHANGELOG.md)
 
 A local development and acceptance workbench for Tunnelde. The React UI runs in a browser or a Tauri desktop window, sharing a Node service for production-component scenarios, test orchestration, isolated native instances and traceable acceptance records.
 
@@ -58,5 +60,17 @@ pnpm acceptance:native 'native:native-service#files'
 Read the [guide and architecture](docs/en-us/guide.md), [coverage and validation notes](docs/en-us/validation.md) and [upstream adapter documentation](https://github.com/TunneldeDev/Tunnelde/blob/dev/docs/en-us/development/debugger.md). Native tasks require an interactive desktop session. Capture failures retain their reason and never create successful screenshot evidence.
 
 Local data lives in the ignored `.tunnelde-debugger/` directory: runs, acceptance records, instance profiles, logs and artifacts. Stop instances and back up reports before deleting it. Unfinished tasks become interrupted after a service restart.
+
+## Support
+
+Start with the documentation index in [SUPPORT.md](SUPPORT.md). Ask usage questions in [Discussions](https://github.com/TunneldeDev/TunneldeDebugger/discussions), use the issue forms for defects and feature requests, and report vulnerabilities privately under the [security policy](SECURITY.md). Remove credentials, private keys and real host information from logs and screenshots.
+
+## Citation
+
+If TunneldeDebugger supports your documentation, research or published work, cite it using the metadata in [CITATION.cff](CITATION.cff):
+
+> TunneldeDev. (2026). *TunneldeDebugger* (Version 0.1.0) [Computer software]. https://github.com/TunneldeDev/TunneldeDebugger
+
+GitHub exposes the metadata through the repository's “Cite this repository” action.
 
 `v0.1.0` is a source-only release with no installers attached. Windows/Linux native source adaptation is retained but has not been validated on those systems. Licensed GPL-3.0-only.

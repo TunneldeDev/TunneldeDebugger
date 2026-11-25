@@ -12,7 +12,7 @@
 - 原生开发需要 Rust 与当前平台的 Tauri 依赖；macOS 还需要 Xcode Command Line Tools。
 - 调试器需要一个相邻的 Tunnelde 检出。首次开发可执行 `pnpm setup:target ../Tunnelde ../Tunnelde-debugger-target` 创建隔离目标。
 - 不要提交 `.tunnelde-debugger/`、`dist/`、`test-results/`、`playwright-report/` 或 `src-tauri/target/` 中的本地产物。
-- 安全问题不要公开提交 Issue，请按 [安全策略](SECURITY.md) 私密报告。
+- 使用问题先看 [支持说明](SUPPORT.md)；安全问题不要公开提交 Issue，请按 [安全策略](SECURITY.md) 私密报告。
 
 ### 开发流程
 
@@ -57,7 +57,7 @@ docs: clarify target setup
 
 ### 发布流程（维护者）
 
-1. 更新 `package.json`、`src-tauri/tauri.conf.json` 与 `CHANGELOG.md` 中的版本。
+1. 更新 `package.json`、`src-tauri/tauri.conf.json`、`CITATION.cff` 与 `CHANGELOG.md` 中的版本和发布日期。
 2. 确认 `main` 上的 macOS、Windows、Linux 检查全部通过。
 3. 创建 `vX.Y.Z` 标签和 GitHub Release。
 4. 当前阶段只发布源码；除非安装包与各平台验收记录齐全，否则不要附加未经证实的构建产物。
@@ -72,7 +72,7 @@ Thank you for improving TunneldeDebugger. The project combines a browser workben
 - Native development requires Rust and the platform's Tauri dependencies. macOS also requires Xcode Command Line Tools.
 - The debugger needs a neighboring Tunnelde checkout. For a first setup, run `pnpm setup:target ../Tunnelde ../Tunnelde-debugger-target` to create an isolated target.
 - Do not commit local artifacts under `.tunnelde-debugger/`, `dist/`, `test-results/`, `playwright-report/` or `src-tauri/target/`.
-- Report security issues privately according to the [security policy](SECURITY.md), not in a public issue.
+- Check [SUPPORT.md](SUPPORT.md) for usage questions, and report security issues privately according to the [security policy](SECURITY.md), not in a public issue.
 
 ### Development workflow
 
@@ -117,7 +117,7 @@ Keep unrelated refactors, formatting and behavior changes in separate commits or
 
 ### Release process (maintainers)
 
-1. Update the version in `package.json`, `src-tauri/tauri.conf.json` and `CHANGELOG.md`.
+1. Update the version and release date in `package.json`, `src-tauri/tauri.conf.json`, `CITATION.cff` and `CHANGELOG.md`.
 2. Confirm the macOS, Windows and Linux checks pass on `main`.
 3. Create a `vX.Y.Z` tag and GitHub Release.
 4. Releases are source-only for now. Do not attach an installer unless its platform builds and acceptance evidence are complete.

@@ -31,4 +31,6 @@ The maintainers will validate the report and coordinate disclosure through the p
 
 - Dependabot proposes updates for pnpm, Cargo and GitHub Actions.
 - Pull requests run source checks on macOS, Windows and Linux.
+- Dependency Review blocks newly introduced high-severity vulnerable dependencies.
+- CodeQL analyzes JavaScript/TypeScript and GitHub Actions on `main`, pull requests and a weekly schedule.
 - A dependency update still requires review of release notes and CI results; automated updates are not automatically trusted.

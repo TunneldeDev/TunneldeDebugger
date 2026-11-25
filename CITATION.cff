@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you reference TunneldeDebugger in documentation, research, or a published work, please cite the metadata in this file."
+title: "TunneldeDebugger"
+abstract: "A browser and Tauri workbench for Tunnelde development, unified test orchestration, isolated native scenarios and traceable acceptance evidence."
+type: software
+authors:
+  - name: "TunneldeDev"
+    website: "https://github.com/TunneldeDev"
+contact:
+  - name: "TunneldeDev"
+    website: "https://github.com/TunneldeDev/TunneldeDebugger"
+repository-code: "https://github.com/TunneldeDev/TunneldeDebugger"
+url: "https://github.com/TunneldeDev/TunneldeDebugger"
+license: "GPL-3.0-only"
+version: "0.1.0"
+date-released: "2026-11-25"
+keywords:
+  - "acceptance testing"
+  - "debugging"
+  - "developer tools"
+  - "playwright"
+  - "react"
+  - "rust"
+  - "tauri"
+  - "test automation"
+  - "testing"
+  - "tunnelde"
+  - "typescript"
+references:
+  - type: software
+    title: "Tunnelde"
+    authors:
+      - name: "TunneldeDev"
+        website: "https://github.com/TunneldeDev"
+    repository-code: "https://github.com/TunneldeDev/Tunnelde"
+    url: "https://github.com/TunneldeDev/Tunnelde"
+    license: "GPL-3.0-only"

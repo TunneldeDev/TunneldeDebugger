@@ -3,12 +3,14 @@
 [English](README.en-us.md)
 
 [![Desktop checks](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml/badge.svg)](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml)
+[![CodeQL](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/codeql.yml/badge.svg)](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/codeql.yml)
 [![Release](https://img.shields.io/github/v/release/TunneldeDev/TunneldeDebugger?label=release)](https://github.com/TunneldeDev/TunneldeDebugger/releases/latest)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+[![Citation File Format](https://img.shields.io/badge/citation-CFF%201.2-success.svg)](CITATION.cff)
 [![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-5FA04E?logo=node.js&logoColor=white)](package.json)
 [![pnpm 10+](https://img.shields.io/badge/pnpm-10%2B-F69220?logo=pnpm&logoColor=white)](package.json)
 
-[使用指南](docs/zh-cn/guide.md) · [覆盖与验收](docs/zh-cn/validation.md) · [参与贡献](CONTRIBUTING.md) · [安全策略](SECURITY.md) · [更新记录](CHANGELOG.md)
+[使用指南](docs/zh-cn/guide.md) · [覆盖与验收](docs/zh-cn/validation.md) · [支持](SUPPORT.md) · [参与贡献](CONTRIBUTING.md) · [安全策略](SECURITY.md) · [引用](CITATION.cff) · [更新记录](CHANGELOG.md)
 
 Tunnelde 的本地开发与验收工作台。React 工作台可在浏览器或 Tauri 桌面运行，共用 Node 服务，支持生产组件场景、统一测试侧栏、隔离原生实例及可追溯的验收记录。
 
@@ -58,5 +60,17 @@ pnpm acceptance:native 'native:native-service#files'
 参阅[操作与架构](docs/zh-cn/guide.md)、[覆盖与验收说明](docs/zh-cn/validation.md)及[主仓库适配说明](https://github.com/TunneldeDev/Tunnelde/blob/dev/docs/zh-cn/development/debugger.md)。原生窗口检查需要可交互的桌面会话；截图失败会保留原因，不生成成功截图证据。
 
 运行数据位于 `.tunnelde-debugger/`，包含运行记录、验收记录、实例配置、日志和产物；已加入 Git 忽略。关闭实例并备份所需报告后，可删除该目录。未完成任务在服务重启后标为“已中断”。
+
+## 支持
+
+先查阅 [支持说明](SUPPORT.md) 中的文档索引。使用问题请到 [Discussions](https://github.com/TunneldeDev/TunneldeDebugger/discussions)，缺陷和功能请求使用 Issue 表单，安全漏洞按 [安全策略](SECURITY.md) 私密报告。提交日志和截图前请移除凭据、私钥与真实主机信息。
+
+## 引用
+
+如果 TunneldeDebugger 对你的文档、研究或发布工作有帮助，可按仓库中的 [CITATION.cff](CITATION.cff) 引用：
+
+> TunneldeDev. (2026). *TunneldeDebugger* (Version 0.1.0) [Computer software]. https://github.com/TunneldeDev/TunneldeDebugger
+
+GitHub 会根据该文件在仓库页面提供 “Cite this repository” 入口。
 
 `v0.1.0` 是仅提供源码的 Release，不附带安装包。Windows/Linux 原生功能保留源码适配，尚未实际验收。许可证 GPL-3.0-only。

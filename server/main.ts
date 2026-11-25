@@ -122,7 +122,7 @@ async function ensureNativeFrontend() {
         host: "127.0.0.1",
         port: port + 2,
         strictPort: true,
-        hmr: { host: "127.0.0.1", port: port + 2 },
+        ws: { host: "127.0.0.1", port: port + 2 },
       },
     });
     await targetServer.listen();
@@ -165,7 +165,7 @@ await createRenderer();
 const vite = await createViteServer({
   root,
   configFile: join(root, "vite.config.ts"),
-  server: { middlewareMode: true, hmr: { port: port + 3 } },
+  server: { middlewareMode: true, ws: { port: port + 3 } },
   appType: "spa",
 });
 async function body(

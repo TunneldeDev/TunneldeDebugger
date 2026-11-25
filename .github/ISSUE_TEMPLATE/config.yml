@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Support and troubleshooting
+    url: https://github.com/TunneldeDev/TunneldeDebugger/blob/main/SUPPORT.md
+    about: Check the documentation index and choose the right support channel.
   - name: Questions and workflow discussion
     url: https://github.com/TunneldeDev/TunneldeDebugger/discussions
     about: Ask usage questions, share setup notes or discuss an idea before filing a focused issue.
