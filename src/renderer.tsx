@@ -61,6 +61,8 @@ window.addEventListener("message", async (event) => {
           width: innerWidth,
           height: innerHeight,
           scale: 1,
+          // DOM clones otherwise render scroll containers from their origin.
+          features: { restoreScrollPosition: true },
           backgroundColor: getComputedStyle(document.body).backgroundColor,
         });
         send({
