@@ -1,3 +1,8 @@
+import { settingsStore, validateSettings, inspectProject } from "./settings";
+import {
+  ACCEPTANCE_RESULTS,
+  ACCEPTANCE_PRIORITIES,
+} from "../shared/acceptance";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -17,6 +22,7 @@ import {
   type TestItem,
   type TargetKind,
 } from "../shared/protocol";
+import { AcceptanceStore } from "./acceptance";
 import { JsonStore, sourceIdentity } from "./storage";
 import { Runner, flattenTests } from "./runners";
 import { Scheduler } from "./scheduler";
@@ -27,17 +33,25 @@ const argument = (name: string) => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
 };
-const target = resolve(
-  argument("--target") ??
-    process.env.TUNNELDE_TARGET ??
-    join(root, "../Tunnelde-debugger-target"),
-);
 const data = resolve(
   argument("--data") ??
     process.env.TUNNELDE_DEBUGGER_DATA ??
     join(root, ".tunnelde-debugger"),
 );
-const port = Number(argument("--port") ?? process.env.PORT ?? 4760);
+const projectStore = settingsStore(
+  data,
+  join(root, "../Tunnelde-debugger-target"),
+);
+let settings = await projectStore.read();
+let target = resolve(
+  argument("--target") ?? process.env.TUNNELDE_TARGET ?? settings.targetPath,
+);
+settings = { ...settings, targetPath: target };
+const port = Number(
+  argument("--port") ?? process.env.PORT ?? settings.servicePort,
+);
+if (!Number.isInteger(port) || port < 1024 || port > 65532)
+  throw new Error("Invalid debugger port (1024–65532)");
 const origin = `http://127.0.0.1:${port}`;
 const rendererOrigin = `http://127.0.0.1:${port + 1}`;
 const nativeFrontend = `http://127.0.0.1:${port + 2}`;
@@ -52,18 +66,25 @@ function changed() {
         client.write("event: changed\ndata: {}\n\n");
     }, 80);
 }
-const scheduler = new Scheduler(target, data, changed, (kind) =>
+let scheduler = new Scheduler(target, data, changed, (kind) =>
   kind === "native"
     ? new NativeRunner(native, ensureNativeFrontend)
     : new Runner(kind, target),
 );
 await scheduler.initialize();
-const native = new NativeManager(target, data, nativeFrontend, changed);
+let native = new NativeManager(
+  target,
+  data,
+  nativeFrontend,
+  changed,
+  settings.launch,
+);
 const recordsStore = new JsonStore<AcceptanceRecord[]>(
   join(data, "acceptance.json"),
   [],
 );
-let records = await recordsStore.read();
+const acceptance = new AcceptanceStore(recordsStore);
+await acceptance.initialize();
 interface ArtifactEvidence {
   scenarioId: string;
   target: TargetKind;
@@ -89,6 +110,7 @@ const browserReady = new Map<
 let frameServer: ViteDevServer | undefined;
 let targetServer: ViteDevServer | undefined;
 let targetError: string | undefined;
+let reconfiguring = false;
 async function ensureNativeFrontend() {
   if (!targetServer) {
     targetServer = await createViteServer({
@@ -107,36 +129,39 @@ async function ensureNativeFrontend() {
   }
 }
 
-try {
-  await stat(join(target, "src/debugger/index.tsx"));
-  frameServer = await createViteServer({
-    root,
-    cacheDir: join(data, "vite-renderer"),
-    optimizeDeps: { entries: ["renderer.html"] },
-    configFile: false,
-    plugins: [react()],
-    define: { "import.meta.env.VITE_TUNNELDE_DEBUGGER": JSON.stringify("1") },
-    resolve: {
-      alias: [
-        {
-          find: "@tunnelde-target",
-          replacement: join(target, "src/debugger/index.tsx"),
-        },
-        { find: "@", replacement: join(target, "src") },
-      ],
-      dedupe: ["react", "react-dom"],
-    },
-    server: {
-      host: "127.0.0.1",
-      port: port + 1,
-      strictPort: true,
-      fs: { allow: [root, target] },
-    },
-  });
-  await frameServer.listen();
-} catch (error) {
-  targetError = String(error);
+async function createRenderer() {
+  try {
+    await stat(join(target, "src/debugger/index.tsx"));
+    frameServer = await createViteServer({
+      root,
+      cacheDir: join(data, "vite-renderer"),
+      optimizeDeps: { entries: ["renderer.html"] },
+      configFile: false,
+      plugins: [react()],
+      define: { "import.meta.env.VITE_TUNNELDE_DEBUGGER": JSON.stringify("1") },
+      resolve: {
+        alias: [
+          {
+            find: "@tunnelde-target",
+            replacement: join(target, "src/debugger/index.tsx"),
+          },
+          { find: "@", replacement: join(target, "src") },
+        ],
+        dedupe: ["react", "react-dom"],
+      },
+      server: {
+        host: "127.0.0.1",
+        port: port + 1,
+        strictPort: true,
+        fs: { allow: [root, target] },
+      },
+    });
+    await frameServer.listen();
+  } catch (error) {
+    targetError = String(error);
+  }
 }
+await createRenderer();
 const vite = await createViteServer({
   root,
   configFile: join(root, "vite.config.ts"),
@@ -150,7 +175,8 @@ async function body(
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > 1024 * 1024) throw new Error("Request body exceeds 1 MiB");
+    if (bytes > (request.url === "/api/attachments" ? 12 : 1) * 1024 * 1024)
+      throw new Error("Request body too large");
     chunks.push(chunk);
   }
   const value = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
@@ -204,14 +230,18 @@ const server = createHttpServer(async (request, response) => {
   }
   try {
     checkedRequest(request);
+    if (reconfiguring && request.method !== "GET")
+      throw new Error("正在应用项目配置 / Project reconfiguration in progress");
     const readOnly =
       [
         "/api/events",
         "/api/config",
+        "/api/settings",
         "/api/scenarios",
         "/api/state",
         "/api/tests",
         "/api/report",
+        "/api/acceptance/trash",
       ].includes(url.pathname) ||
       url.pathname.startsWith("/artifacts/") ||
       /^\/api\/runs\/[^/]+\/events$/.test(url.pathname);
@@ -232,12 +262,92 @@ const server = createHttpServer(async (request, response) => {
     }
     if (url.pathname === "/api/config") {
       json(response, {
-        source: await sourceIdentity(target),
+        source: await sourceIdentity(target).catch(() => ({
+          path: target,
+          revision: "unavailable",
+          dirtyFingerprint: "",
+          protocol: 1,
+        })),
         rendererOrigin,
+        workspace: root,
         targetError,
         protocol: 1,
         platform: process.platform,
       });
+      return;
+    }
+    if (url.pathname === "/api/settings" && request.method === "GET") {
+      json(response, {
+        settings,
+        active: { targetPath: target, servicePort: port },
+        endpoints: {
+          service: origin,
+          renderer: rendererOrigin,
+          nativeFrontend,
+        },
+        dataDirectory: data,
+        project: await inspectProject(target).catch(() => null),
+      });
+      return;
+    }
+    if (url.pathname === "/api/settings/check") {
+      const input = await body(request);
+      const next = validateSettings(input);
+      json(response, await inspectProject(next.targetPath));
+      return;
+    }
+    if (url.pathname === "/api/settings/save") {
+      const next = validateSettings(await body(request));
+      reconfiguring = true;
+      try {
+        const project = await inspectProject(next.targetPath);
+        if (
+          scheduler.runs.some((run) =>
+            ["running", "queued"].includes(run.status),
+          ) ||
+          discovering.size ||
+          ["starting", "applying", "ready"].includes(native.state.state)
+        )
+          throw new Error(
+            "请先停止实例和测试再修改配置 / Stop instances and tests before reconfiguration",
+          );
+        await projectStore.write(next);
+        const pathChanged = target !== next.targetPath;
+        settings = next;
+        await native.stop();
+        native = new NativeManager(
+          next.targetPath,
+          data,
+          nativeFrontend,
+          changed,
+          next.launch,
+        );
+        if (pathChanged) {
+          await frameServer?.close();
+          frameServer = undefined;
+          await targetServer?.close();
+          targetServer = undefined;
+          target = next.targetPath;
+          targetError = undefined;
+          browserReady.clear();
+          testTree.clear();
+          scheduler = new Scheduler(target, data, changed, (kind) =>
+            kind === "native"
+              ? new NativeRunner(native, ensureNativeFrontend)
+              : new Runner(kind, target),
+          );
+          await scheduler.initialize();
+          await createRenderer();
+        }
+        changed();
+        json(response, {
+          ok: true,
+          restartRequired: next.servicePort !== port,
+          project,
+        });
+      } finally {
+        reconfiguring = false;
+      }
       return;
     }
     if (url.pathname === "/api/scenarios") {
@@ -247,7 +357,7 @@ const server = createHttpServer(async (request, response) => {
     if (url.pathname === "/api/state") {
       json(response, {
         runs: scheduler.runs.slice(-100),
-        records,
+        records: acceptance.list(),
         native: native.state,
         nativeLogs: native.logs,
       });
@@ -268,7 +378,9 @@ const server = createHttpServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/tests" && request.method === "GET") {
-      for (const run of scheduler.runs)
+      for (const run of scheduler.runs.filter(
+        (run) => run.source.path === target,
+      ))
         for (const event of Object.values(
           run.results ??
             Object.fromEntries(
@@ -357,51 +469,91 @@ const server = createHttpServer(async (request, response) => {
       json(response, { ticket });
       return;
     }
-    if (url.pathname === "/api/acceptance" && request.method === "POST") {
+    if (url.pathname === "/api/acceptance/trash") {
+      json(
+        response,
+        acceptance.list(true).filter((record) => record.deletedAt),
+      );
+      return;
+    }
+    const recordAction = /^\/api\/acceptance\/([^/]+)\/(delete|restore)$/.exec(
+      url.pathname,
+    );
+    if (recordAction) {
       const input = await body(request);
-      const scenario = scenarioById(String(input.scenarioId));
-      const parameters = validateParameters(input.parameters);
+      const record =
+        recordAction[2] === "delete"
+          ? await acceptance.remove(
+              recordAction[1]!,
+              String(input.expectedUpdatedAt),
+            )
+          : await acceptance.restore(recordAction[1]!);
+      json(response, record);
+      changed();
+      return;
+    }
+    if (url.pathname === "/api/acceptance") {
+      const input = await body(request);
+      const existing = input.id
+        ? acceptance.list().find((record) => record.id === input.id)
+        : undefined;
+      if (input.id && !existing)
+        throw new Error("记录不存在 / Record not found");
+      const context = existing ?? input;
+      const scenario = scenarioById(String(context.scenarioId));
+      const parameters = validateParameters(context.parameters);
+      const targetKind = context.target as TargetKind;
       if (
-        !scenario.targets.includes(input.target as TargetKind) ||
-        !["pending", "passed", "failed", "blocked"].includes(
-          String(input.status),
+        !scenario.targets.includes(targetKind) ||
+        !Object.hasOwn(ACCEPTANCE_RESULTS, String(input.status)) ||
+        !Object.hasOwn(
+          ACCEPTANCE_PRIORITIES,
+          String(input.priority ?? existing?.priority ?? "P2"),
         )
       )
         throw new Error("Invalid acceptance result");
-      if (
-        input.target !== "browser" &&
-        (native.state.state !== "ready" ||
-          native.state.scenarioId !== scenario.id ||
-          native.state.mode !== input.target ||
-          JSON.stringify(native.state.parameters) !==
-            JSON.stringify(parameters) ||
-          input.generation !== native.state.generation)
-      )
-        throw new Error("Acceptance does not match the ready native scenario");
       const browserEvidence = browserReady.get(String(input.ticket));
-      if (
-        input.target === "browser" &&
-        input.status === "passed" &&
-        (!browserEvidence ||
-          browserEvidence.scenarioId !== scenario.id ||
-          JSON.stringify(browserEvidence.parameters) !==
-            JSON.stringify(parameters))
-      )
-        throw new Error(
-          "Browser scene has no matching readiness acknowledgement",
-        );
-      if (input.status === "passed") {
-        const source =
-          input.target === "browser"
-            ? browserEvidence!.source
-            : native.state.source!;
-        const currentSource = await sourceIdentity(target);
+      const nativeMatches =
+        native.state.state === "ready" &&
+        native.state.scenarioId === scenario.id &&
+        native.state.mode === targetKind &&
+        JSON.stringify(native.state.parameters) ===
+          JSON.stringify(parameters) &&
+        input.generation === native.state.generation;
+      // Failures and blocked scenes must remain reportable even if the target has exited.
+      const source =
+        existing?.source ??
+        (targetKind === "browser"
+          ? browserEvidence?.source
+          : native.state.source) ??
+        (await sourceIdentity(target));
+      if (input.status === "passed" && existing?.status !== "passed") {
         if (
-          currentSource.revision !== source.revision ||
-          currentSource.dirtyFingerprint !== source.dirtyFingerprint
+          targetKind === "browser" &&
+          (!browserEvidence ||
+            browserEvidence.scenarioId !== scenario.id ||
+            JSON.stringify(browserEvidence.parameters) !==
+              JSON.stringify(parameters))
         )
           throw new Error(
-            "Target source changed; reload the scenario before acceptance",
+            "场景尚未就绪，仍可保存问题或阻塞记录 / Scene not ready for a pass",
+          );
+        if (targetKind !== "browser" && !nativeMatches)
+          throw new Error(
+            "原生场景尚未就绪，仍可保存问题或阻塞记录 / Native scene not ready for a pass",
+          );
+        const currentSource = await sourceIdentity(target);
+        const liveSource =
+          targetKind === "browser"
+            ? browserEvidence!.source
+            : native.state.source!;
+        if (
+          currentSource.revision !== source.revision ||
+          currentSource.dirtyFingerprint !== source.dirtyFingerprint ||
+          liveSource.dirtyFingerprint !== source.dirtyFingerprint
+        )
+          throw new Error(
+            "源码已变化，请在当前场景新建验收记录 / Source changed; create a new acceptance record",
           );
       }
       const screenshots = Array.isArray(input.screenshots)
@@ -411,65 +563,113 @@ const server = createHttpServer(async (request, response) => {
         screenshots.length > 20 ||
         screenshots.some((name) => {
           if (typeof name !== "string" || basename(name) !== name) return true;
+          if (existing?.screenshots.includes(name)) return false;
           const evidence = artifacts[name];
-          const source =
-            input.target === "browser"
-              ? browserEvidence?.source
-              : native.state.source;
           return (
             !evidence ||
-            !source ||
             evidence.scenarioId !== scenario.id ||
-            evidence.target !== input.target ||
+            evidence.target !== targetKind ||
             JSON.stringify(evidence.parameters) !==
               JSON.stringify(parameters) ||
             evidence.source.revision !== source.revision ||
             evidence.source.dirtyFingerprint !== source.dirtyFingerprint ||
-            (input.target !== "browser" &&
-              evidence.generation !== native.state.generation)
+            (targetKind !== "browser" &&
+              input.status === "passed" &&
+              !existing &&
+              evidence.generation !== input.generation)
           );
         })
       )
         throw new Error(
-          "Screenshot evidence does not belong to this scenario, parameters and source",
+          "图片不属于这条记录的场景与源码 / Attachment does not match this record",
         );
       await Promise.all(
         screenshots.map((name) => stat(join(data, "artifacts", String(name)))),
       );
       const record: AcceptanceRecord = {
-        id: randomUUID(),
+        id: existing?.id ?? randomUUID(),
         scenarioId: scenario.id,
-        target: input.target as TargetKind,
+        target: targetKind,
         parameters,
-        source:
-          input.target === "browser"
-            ? (browserEvidence?.source ?? (await sourceIdentity(target)))
-            : native.state.source!,
+        source,
+        status: input.status as AcceptanceRecord["status"],
+        priority: (input.priority ??
+          existing?.priority ??
+          "P2") as AcceptanceRecord["priority"],
+        title: String(input.title ?? "").slice(0, 200),
+        steps: String(input.steps ?? "").slice(0, 10000),
+        expected: String(input.expected ?? "").slice(0, 10000),
+        note: String(input.note ?? "").slice(0, 20000),
+        screenshots: screenshots as string[],
         checklist: Array.isArray(input.checklist)
           ? input.checklist.filter(
               (value): value is string =>
                 typeof value === "string" && scenario.checklist.includes(value),
             )
           : [],
-        status: input.status as AcceptanceRecord["status"],
-        note: String(input.note ?? "").slice(0, 20000),
-        screenshots: Array.isArray(input.screenshots)
-          ? input.screenshots
-              .filter(
-                (name): name is string =>
-                  typeof name === "string" && basename(name) === name,
-              )
-              .slice(0, 20)
-          : [],
         updatedAt: new Date().toISOString(),
-        ...(input.target !== "browser"
-          ? { generation: native.state.generation }
+        ...(targetKind !== "browser"
+          ? { generation: existing?.generation ?? native.state.generation }
           : {}),
       };
-      records.push(record);
-      await recordsStore.write(records);
-      json(response, record);
+      json(
+        response,
+        await acceptance.save(
+          record,
+          input.expectedUpdatedAt as string | undefined,
+        ),
+      );
       changed();
+      return;
+    }
+    if (url.pathname === "/api/attachments") {
+      const input = await body(request);
+      const existing = input.recordId
+        ? acceptance.list().find((record) => record.id === input.recordId)
+        : undefined;
+      if (input.recordId && !existing)
+        throw new Error("记录不存在 / Record not found");
+      const context = existing ?? input;
+      const scenario = scenarioById(String(context.scenarioId));
+      const parameters = validateParameters(context.parameters);
+      if (!scenario.targets.includes(context.target as TargetKind))
+        throw new Error("Invalid target");
+      const image = String(input.image ?? "");
+      if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image))
+        throw new Error("仅接受 PNG 图片 / PNG image required");
+      const bytes = Buffer.from(image.slice(image.indexOf(",") + 1), "base64");
+      if (
+        bytes.length < 24 ||
+        bytes.length > 8 * 1024 * 1024 ||
+        !bytes
+          .subarray(0, 8)
+          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+        bytes.toString("ascii", 12, 16) !== "IHDR" ||
+        !bytes.readUInt32BE(16) ||
+        !bytes.readUInt32BE(20) ||
+        bytes.readUInt32BE(16) > 8192 ||
+        bytes.readUInt32BE(20) > 8192
+      )
+        throw new Error("图片无效或超过 8 MiB / Invalid image or over 8 MiB");
+      const name = `evidence-${randomUUID()}.png`;
+      const browserEvidence = browserReady.get(String(input.ticket));
+      const source =
+        existing?.source ??
+        (context.target === "browser"
+          ? browserEvidence?.source
+          : native.state.source) ??
+        (await sourceIdentity(target));
+      await mkdir(join(data, "artifacts"), { recursive: true });
+      await writeFile(join(data, "artifacts", name), bytes, { mode: 0o600 });
+      artifacts[name] = {
+        scenarioId: scenario.id,
+        target: context.target as TargetKind,
+        parameters,
+        source,
+        generation: native.state.generation,
+      };
+      await artifactsStore.write(artifacts);
+      json(response, { artifact: name });
       return;
     }
     if (url.pathname === "/api/report") {
@@ -478,7 +678,7 @@ const server = createHttpServer(async (request, response) => {
         generatedAt: new Date().toISOString(),
         source: await sourceIdentity(target),
         coverage: scenarios,
-        records,
+        records: acceptance.list(),
         runs: scheduler.runs,
         native: native.state,
       });
@@ -545,8 +745,23 @@ const server = createHttpServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/native/capture") {
-      await body(request);
+      const input = await body(request);
+      const before = structuredClone(native.state);
+      if (
+        before.state !== "ready" ||
+        input.scenarioId !== before.scenarioId ||
+        input.generation !== before.generation ||
+        JSON.stringify(input.parameters) !== JSON.stringify(before.parameters)
+      )
+        throw new Error(
+          "Native screenshot does not match the selected scenario",
+        );
       const artifact = await native.capture();
+      if (
+        before.runId !== native.state.runId ||
+        before.generation !== native.state.generation
+      )
+        throw new Error("Native scene changed during capture");
       artifacts[artifact] = {
         scenarioId: native.state.scenarioId!,
         target: native.state.mode!,
@@ -559,42 +774,9 @@ const server = createHttpServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/capture") {
-      const input = await body(request);
-      const scenario = scenarioById(String(input.scenarioId));
-      const parameters = validateParameters(input.parameters);
-      const { chromium } = await import("@playwright/test");
-      const browser = await chromium.launch({ headless: true });
-      try {
-        const page = await browser.newPage({
-          viewport: { width: parameters.width, height: parameters.height },
-        });
-        await page.goto(`${origin}/?scene=${scenario.id}`);
-        await page.evaluate(
-          (params) =>
-            window.dispatchEvent(
-              new CustomEvent("debugger:parameters", { detail: params }),
-            ),
-          parameters,
-        );
-        await page.getByTestId("scene-ready").waitFor({ timeout: 60000 });
-        const name = `browser-${scenario.id}-${Date.now()}.png`;
-        await mkdir(join(data, "artifacts"), { recursive: true });
-        await page
-          .frameLocator("iframe")
-          .locator("body")
-          .screenshot({ path: join(data, "artifacts", name) });
-        artifacts[name] = {
-          scenarioId: scenario.id,
-          target: "browser",
-          parameters,
-          source: await sourceIdentity(target),
-        };
-        await artifactsStore.write(artifacts);
-        json(response, { artifact: name });
-      } finally {
-        await browser.close();
-      }
-      return;
+      throw new Error(
+        "请从当前场景截图或上传图片 / Capture the live scene or attach an image",
+      );
     }
     if (url.pathname.startsWith("/artifacts/")) {
       const name = url.pathname.slice(11);

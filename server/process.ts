@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import spawn from "cross-spawn";
 import { StringDecoder } from "node:string_decoder";
 export interface ProcessResult {
   code: number | null;
@@ -31,6 +32,7 @@ export async function runProcess(
     onLine?: (line: string) => void;
     onChild?: (child: ChildProcess) => void;
     timeout?: number;
+    color?: boolean;
   },
 ): Promise<ProcessResult> {
   if (options.signal?.aborted)
@@ -39,8 +41,8 @@ export async function runProcess(
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
       ...options.env,
-      FORCE_COLOR: "0",
-      NO_COLOR: "1",
+      FORCE_COLOR: options.color ? "1" : "0",
+      NO_COLOR: options.color ? undefined : "1",
     };
     delete environment.NODE_TEST_CONTEXT;
     const child = spawn(command, args, {

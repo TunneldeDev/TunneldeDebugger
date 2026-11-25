@@ -54,6 +54,29 @@ window.addEventListener("message", async (event) => {
   )
     return;
   try {
+    if (message.type === "capture") {
+      try {
+        const { domToCanvas } = await import("modern-screenshot");
+        const canvas = await domToCanvas(document.documentElement, {
+          width: innerWidth,
+          height: innerHeight,
+          scale: 1,
+          backgroundColor: getComputedStyle(document.body).backgroundColor,
+        });
+        send({
+          type: "captured",
+          requestId: message.requestId,
+          image: canvas.toDataURL("image/png"),
+        });
+      } catch (error) {
+        send({
+          type: "captured",
+          requestId: message.requestId,
+          error: String(error),
+        });
+      }
+      return;
+    }
     const target = await import("@tunnelde-target");
     if (message.type === "snapshot") {
       send({ type: "state", snapshot: target.snapshot() });

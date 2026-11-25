@@ -1,3 +1,6 @@
+import { ProjectSettingsDialog } from "./project-settings";
+import { AnsiText } from "./ansi-text";
+import { Select } from "./select";
 import {
   useEffect,
   useRef,
@@ -6,15 +9,14 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Activity,
-  ArrowDown,
   ArrowLeft,
   ArrowRight,
   Camera,
+  Hand,
+  Move,
   Check,
   ChevronDown,
   ChevronRight,
-  Circle,
   CircleCheck,
   ClipboardCheck,
   Code2,
@@ -25,6 +27,10 @@ import {
   Layers3,
   LoaderCircle,
   Monitor,
+  Minus,
+  Maximize2,
+  PanelLeft,
+  PanelRight,
   Moon,
   Play,
   Plus,
@@ -38,6 +44,8 @@ import {
   Zap,
 } from "lucide-react";
 import { localize } from "./i18n";
+import { api } from "./api";
+import { AcceptancePanel } from "./acceptance-panel";
 import {
   DEFAULT_PARAMETERS,
   type ScenarioDefinition,
@@ -62,21 +70,6 @@ interface State {
   records: AcceptanceRecord[];
   native: NativeState;
   nativeLogs: string[];
-}
-async function api<T>(path: string, value?: object): Promise<T> {
-  const response = await fetch(
-    `/api/${path}`,
-    value
-      ? {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(value),
-        }
-      : undefined,
-  );
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
-  return data as T;
 }
 const labels: Record<string, string> = {
   normal: "常规数据",
@@ -128,6 +121,8 @@ export function Workbench() {
   const [section, setSection] = useState<"scenes" | "tests" | "native">(
     "scenes",
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [projectGeneration, setProjectGeneration] = useState(0);
   const [config, setConfig] = useState<Config>();
   const [scenes, setScenes] = useState<ScenarioDefinition[]>([]);
   const [selected, setSelected] = useState(
@@ -154,17 +149,78 @@ export function Workbench() {
   const [tool, setTool] = useState<"parameters" | "diagnostics" | "acceptance">(
     "parameters",
   );
-  const [checklist, setChecklist] = useState<string[]>([]);
-  const [note, setNote] = useState("");
-  const [screenshots, setScreenshots] = useState<string[]>([]);
+  const [captureRequest, setCaptureRequest] = useState(0);
   const [mode, setMode] = useState<TargetKind>("native-mock");
   const [snapshot, setSnapshot] = useState<unknown>();
   const searchInput = useRef<HTMLInputElement>(null);
+  const canvas = useRef<HTMLDivElement>(null);
+  const [panMode, setPanMode] = useState(false);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panDrag = useRef<
+    { x: number; y: number; originX: number; originY: number } | undefined
+  >(undefined);
+  const recenter = () => {
+    setPan({ x: 0, y: 0 });
+    setZoom("fit");
+    if (canvas.current) {
+      canvas.current.scrollTop = 0;
+      canvas.current.scrollLeft = 0;
+    }
+  };
+
+  const [zoom, setZoom] = useState<number | "fit">("fit");
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [catalogOpen, setCatalogOpen] = useState<boolean>();
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>();
+  const inspectorVisible = inspectorOpen ?? false;
+  const catalogOverlay = windowWidth < 850 || (inspectorVisible && windowWidth < 1180);
+  const catalogVisible = catalogOpen ?? !catalogOverlay;
+  // Keep the renderer's layout viewport intact; only scale its presentation.
+  const frameWidth = parameters.width + 2;
+  const frameHeight = parameters.height + 33;
+  const fitScale =
+    canvasSize.width && canvasSize.height
+      ? Math.min(
+          1,
+          canvasSize.width / frameWidth,
+          canvasSize.height / frameHeight,
+        )
+      : 1;
+  const scale = zoom === "fit" ? fitScale : zoom;
+  const changeZoom = (direction: number) =>
+    setZoom(
+      Math.min(
+        2,
+        Math.max(0.1, Math.round((scale + direction * 0.1) * 100) / 100),
+      ),
+    );
+  useEffect(() => {
+    const resize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  useEffect(() => {
+    const element = canvas.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry)
+        setCanvasSize({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [section]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchInput.current?.focus();
+        setCatalogOpen(true);
+        requestAnimationFrame(() => searchInput.current?.focus());
       }
     };
     window.addEventListener("keydown", key);
@@ -217,9 +273,6 @@ export function Workbench() {
     setGeneration((value) => value + 1);
     setDiagnostics([]);
     setSnapshot(undefined);
-    setScreenshots([]);
-    setChecklist([]);
-    setNote("");
   }, [selected, parameters]);
   useEffect(() => {
     const receive = (event: MessageEvent<FrameMessage>) => {
@@ -298,35 +351,91 @@ export function Workbench() {
     });
   const run =
     state.runs.find((item) => item.id === selectedRun) ?? state.runs.at(-1);
+  const acceptanceSource =
+    section === "native"
+      ? (state.native.source ?? config?.source)
+      : config?.source;
   const nativeReady =
     state.native.state === "ready" &&
     state.native.scenarioId === selected &&
     state.native.mode === mode &&
     JSON.stringify(state.native.parameters) === JSON.stringify(parameters);
-  const capture = () =>
-    perform("capture", async () => {
-      const result = await api<{ artifact: string }>(
-        section === "native" ? "native/capture" : "capture",
-        { scenarioId: selected, parameters },
-      );
-      setScreenshots((previous) => [...previous, result.artifact]);
-      setTool("acceptance");
-    });
-  const saveAcceptance = (status: AcceptanceRecord["status"]) =>
-    perform("acceptance", async () => {
-      await api("acceptance", {
+  const captureCurrent = async (): Promise<string> => {
+    if (section === "native") {
+      const result = await api<{ artifact: string }>("native/capture", {
         scenarioId: selected,
-        target: section === "native" ? mode : "browser",
         parameters,
-        status,
-        note,
-        screenshots,
         generation: state.native.generation,
-        checklist,
-        ticket,
       });
-      setNote("");
+      return result.artifact;
+    }
+    const element = frame.current;
+    if (!element?.contentWindow || !config)
+      throw new Error("场景尚未挂载 / Scene not mounted");
+    const requestId = crypto.randomUUID();
+    const image = await new Promise<string>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        clearInterval(watch);
+        window.removeEventListener("message", receive);
+      };
+      const receive = (event: MessageEvent<FrameMessage>) => {
+        const message = event.data;
+        if (
+          event.source !== element.contentWindow ||
+          event.origin !== config.rendererOrigin ||
+          message?.version !== 1 ||
+          message.session !== session.current ||
+          message.generation !== generation ||
+          message.type !== "captured" ||
+          message.requestId !== requestId
+        )
+          return;
+        cleanup();
+        if (message.error || !message.image)
+          reject(new Error(message.error ?? "截图失败 / Capture failed"));
+        else resolve(message.image);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(
+          new Error(
+            "截图超时，可上传或粘贴图片 / Capture timed out; attach an image instead",
+          ),
+        );
+      }, 20000);
+      const watch = setInterval(() => {
+        if (frame.current !== element || !element.isConnected) {
+          cleanup();
+          reject(new Error("场景已切换 / Scene changed during capture"));
+        }
+      }, 100);
+      window.addEventListener("message", receive);
+      element.contentWindow!.postMessage(
+        {
+          version: 1,
+          session: session.current,
+          generation,
+          type: "capture",
+          requestId,
+        },
+        config.rendererOrigin,
+      );
     });
+    const result = await api<{ artifact: string }>("attachments", {
+      scenarioId: selected,
+      target: "browser",
+      parameters,
+      ticket,
+      image,
+    });
+    return result.artifact;
+  };
+  const openAcceptance = (takeScreenshot = false) => {
+    setTool("acceptance");
+    setInspectorOpen(true);
+    if (takeScreenshot) setCaptureRequest((previous) => previous + 1);
+  };
   const exportReport = () =>
     perform("export", async () => {
       const report = await api("report");
@@ -344,9 +453,12 @@ export function Workbench() {
   const patch = (value: Partial<ScenarioParameters>) =>
     setParameters((previous) => ({ ...previous, ...value }));
   return localize(
-    <div className="debugger" lang={uiLocale}>
+    <div
+      className={`debugger ${tool === "acceptance" ? "accepting" : ""}`}
+      lang={uiLocale}
+    >
       <header className="topbar">
-        <select
+        <Select
           aria-label="Workbench language"
           value={uiLocale}
           onChange={(event) =>
@@ -355,26 +467,38 @@ export function Workbench() {
         >
           <option value="zh-CN">中文</option>
           <option value="en-US">English</option>
-        </select>
+        </Select>
         <div className="brand">
-          <span className="brand-icon">
-            <Terminal size={19} />
-          </span>
+          <img className="brand-icon" src="/app-icon.svg" alt="" />
           <strong>
             Tunnelde<span>Debugger</span>
           </strong>
           <span className="version">0.1</span>
         </div>
         <div className="workspace-path">
-          <span className="green-dot" />
           本地工作区<span className="divider">/</span>
           <span title={config?.source.path}>
             {config?.source.path.split("/").at(-1) ?? "连接中…"}
           </span>
           <code>{config?.source.revision.slice(0, 7)}</code>
         </div>
-        <button className="text-button" onClick={exportReport}>
-          <Download size={14} /> 导出报告
+        <button
+          className="text-button"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="项目配置"
+          title="项目配置"
+        >
+          <Settings2 size={14} />
+          <span>项目配置</span>
+        </button>
+        <button
+          className="text-button"
+          onClick={exportReport}
+          aria-label="导出报告"
+          title="导出报告"
+        >
+          <Download size={14} />
+          <span>导出报告</span>
         </button>
       </header>
       <div className="layout">
@@ -404,12 +528,18 @@ export function Workbench() {
             <Monitor size={21} />
             <span>原生</span>
           </button>
-          <div className="rail-bottom">
-            <Activity size={19} />
-            <span className="green-dot" />
-          </div>
         </nav>
-        <aside className="catalog">
+        {catalogOverlay && catalogVisible && (
+          <button
+            className="panel-scrim"
+            aria-label="收起侧栏"
+            onClick={() => {
+              setCatalogOpen(false);
+              setInspectorOpen(false);
+            }}
+          />
+        )}
+        <aside id="catalog" className="catalog" hidden={!catalogVisible}>
           <div className="catalog-heading">
             <span>
               {section === "tests" ? "测试资源管理器" : "场景资源管理器"}
@@ -498,7 +628,6 @@ export function Workbench() {
               categories.map((category) => (
                 <div className="category" key={category}>
                   <div className="group-heading">
-                    <ChevronDown size={11} />
                     <span>{category}</span>
                   </div>
                   {filtered
@@ -511,29 +640,25 @@ export function Workbench() {
                       >
                         <FileCode2 size={14} />
                         <span>{item.title}</span>
-                        {state.records.some(
-                          (record) =>
-                            record.scenarioId === item.id &&
-                            record.status === "passed" &&
-                            record.parameters.preset === parameters.preset,
-                        ) ? (
-                          <Check className="passed" size={12} />
-                        ) : (
-                          <span className="scene-dot" />
-                        )}
                       </button>
                     ))}
                 </div>
               ))
             )}
           </div>
-          <div className="catalog-footer">
-            <span className="green-dot" />
-            {section === "tests" ? "按目标串行调度" : "复用 Tunnelde 生产组件"}
-          </div>
         </aside>
         <main className="main">
           <div className="main-heading">
+            <button
+              className="panel-toggle"
+              title="切换资源管理器"
+              aria-label="切换资源管理器"
+              aria-controls="catalog"
+              aria-expanded={catalogVisible}
+              onClick={() => setCatalogOpen(!catalogVisible)}
+            >
+              <PanelLeft size={16} />
+            </button>
             <div className="breadcrumbs">
               <span>{section === "tests" ? "测试运行" : scene?.category}</span>
               <ChevronRight size={12} />
@@ -584,16 +709,32 @@ export function Workbench() {
                         : "加载场景"}
                   </span>
                   <Action
-                    onClick={capture}
+                    onClick={() => openAcceptance(true)}
                     disabled={
-                      !!busy || (section === "native" ? !nativeReady : !ready)
+                      !!busy ||
+                      (section === "native"
+                        ? !nativeReady
+                        : !!config?.targetError || !scene)
                     }
                   >
                     <Camera size={13} />
                     截图
                   </Action>
+                  <Action onClick={() => openAcceptance()} primary>
+                    记录问题
+                  </Action>
                 </>
               )}
+              <button
+                className="panel-toggle"
+                title="切换检查器"
+                aria-label="切换检查器"
+                aria-controls="inspector"
+                aria-expanded={inspectorVisible}
+                onClick={() => setInspectorOpen(!inspectorVisible)}
+              >
+                <PanelRight size={16} />
+              </button>
             </div>
           </div>
           {error && (
@@ -704,9 +845,11 @@ export function Workbench() {
                     >
                       <span>{event.time.slice(11, 23)}</span>
                       <code>
-                        {event.type === "case"
-                          ? `[${labels[event.status ?? ""] ?? event.status}] ${event.text ?? event.itemId}${event.duration !== undefined ? ` (${Math.round(event.duration)}ms)` : ""}`
-                          : event.text}
+                        {event.type === "case" ? (
+                          `[${labels[event.status ?? ""] ?? event.status}] ${event.text ?? event.itemId}${event.duration !== undefined ? ` (${Math.round(event.duration)}ms)` : ""}`
+                        ) : (
+                          <AnsiText text={event.text ?? ""} />
+                        )}
                         {event.artifact && (
                           <a
                             href={`/artifacts/${event.artifact}`}
@@ -729,7 +872,6 @@ export function Workbench() {
                 <div className="native-symbol">
                   <Monitor size={34} />
                 </div>
-                <span className="eyebrow">ISOLATED DESKTOP TARGET</span>
                 <h1>在真实桌面中验收</h1>
                 <p>
                   把当前场景发送到隔离的 Tunnelde 实例。
@@ -881,7 +1023,9 @@ export function Workbench() {
                 <div className="console-body">
                   {state.nativeLogs.map((line, i) => (
                     <div className="log-line" key={i}>
-                      <code>{line}</code>
+                      <code>
+                        <AnsiText text={line} />
+                      </code>
                     </div>
                   ))}
                 </div>
@@ -890,11 +1034,22 @@ export function Workbench() {
           ) : (
             <>
               <div className="preview-toolbar">
-                <div className="variant">
-                  <span className="blue-dot" />
-                  {labels[parameters.preset]}
-                  <ChevronDown size={11} />
-                </div>
+                <Select
+                  aria-label="数据预设"
+                  value={parameters.preset}
+                  onChange={(event) =>
+                    patch({
+                      preset: event.target
+                        .value as ScenarioParameters["preset"],
+                    })
+                  }
+                >
+                  {scene?.presets.map((preset) => (
+                    <option key={preset} value={preset}>
+                      {labels[preset]}
+                    </option>
+                  ))}
+                </Select>
                 <span className="toolbar-divider" />
                 <button
                   title="切换明暗主题"
@@ -910,7 +1065,7 @@ export function Workbench() {
                     <Sun size={14} />
                   )}
                 </button>
-                <select
+                <Select
                   aria-label="场景语言"
                   value={parameters.locale}
                   onChange={(event) =>
@@ -922,9 +1077,90 @@ export function Workbench() {
                 >
                   <option value="zh-CN">简体中文</option>
                   <option value="en-US">English</option>
-                </select>
+                </Select>
                 <span className="toolbar-spacer" />
-                <code>
+                <button
+                  title="拖动画布"
+                  aria-label="拖动画布"
+                  aria-pressed={panMode}
+                  className={panMode ? "selected" : ""}
+                  onClick={() => setPanMode(!panMode)}
+                >
+                  <Hand size={14} />
+                </button>
+                <button
+                  title="居中画布"
+                  aria-label="居中画布"
+                  onClick={recenter}
+                >
+                  <Move size={14} />
+                </button>
+                <div
+                  className="zoom-controls"
+                  role="group"
+                  aria-label="预览缩放"
+                >
+                  <button
+                    title="缩小预览"
+                    aria-label="缩小预览"
+                    disabled={scale <= 0.1}
+                    onClick={() => changeZoom(-1)}
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <Select
+                    aria-label="预览比例"
+                    value={zoom === "fit" ? "fit" : String(zoom)}
+                    onChange={(event) =>
+                      setZoom(
+                        event.target.value === "fit"
+                          ? "fit"
+                          : Number(event.target.value),
+                      )
+                    }
+                  >
+                    <option value="fit">
+                      适应窗口 · {Math.round(fitScale * 100)}%
+                    </option>
+                    {[
+                      ...new Set([
+                        0.1,
+                        0.25,
+                        0.5,
+                        0.75,
+                        1,
+                        1.25,
+                        1.5,
+                        2,
+                        ...(zoom === "fit" ? [] : [zoom]),
+                      ]),
+                    ]
+                      .sort((a, b) => a - b)
+                      .map((value) => (
+                        <option key={value} value={String(value)}>
+                          {Math.round(value * 100)}%
+                        </option>
+                      ))}
+                  </Select>
+                  <button
+                    title="放大预览"
+                    aria-label="放大预览"
+                    disabled={scale >= 2}
+                    onClick={() => changeZoom(1)}
+                  >
+                    <Plus size={14} />
+                  </button>
+                  <button
+                    className={zoom === "fit" ? "selected" : ""}
+                    title="适应窗口"
+                    aria-label="适应窗口"
+                    aria-pressed={zoom === "fit"}
+                    onClick={recenter}
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                </div>
+                <code className="viewport-size" title="渲染视口尺寸">
                   {parameters.width} × {parameters.height}
                 </code>
                 <button
@@ -938,49 +1174,99 @@ export function Workbench() {
                   <RefreshCw size={14} />
                 </button>
               </div>
-              <div className="preview-canvas">
+              <div
+                className={`preview-canvas ${panMode ? "pan-mode" : ""}`}
+                ref={canvas}
+                onPointerDown={(event) => {
+                  if (
+                    event.button !== 0 ||
+                    (!(event.target as Element).closest(".frame-chrome") &&
+                      !(event.target as Element).closest(
+                        ".canvas-drag-surface",
+                      ))
+                  )
+                    return;
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  panDrag.current = {
+                    x: event.clientX,
+                    y: event.clientY,
+                    originX: pan.x,
+                    originY: pan.y,
+                  };
+                }}
+                onPointerMove={(event) => {
+                  const drag = panDrag.current;
+                  if (drag)
+                    setPan({
+                      x: drag.originX + event.clientX - drag.x,
+                      y: drag.originY + event.clientY - drag.y,
+                    });
+                }}
+                onPointerUp={() => {
+                  panDrag.current = undefined;
+                }}
+                onPointerCancel={() => {
+                  panDrag.current = undefined;
+                }}
+              >
+                {panMode && (
+                  <div
+                    className="canvas-drag-surface"
+                    aria-label="拖动画布区域"
+                  />
+                )}
                 <div
-                  className="frame-container"
-                  style={{ width: parameters.width, height: parameters.height }}
+                  className="frame-stage"
+                  style={{
+                    width: frameWidth * scale,
+                    height: frameHeight * scale,
+                    transform: `translate(${pan.x}px, ${pan.y}px)`,
+                  }}
                 >
-                  <div className="frame-chrome">
-                    <span />
-                    <span />
-                    <span />
-                    <code>tunnelde / {selected}</code>
-                    <span className="frame-caption">DEVELOPMENT SCENE</span>
-                  </div>
-                  {config && scene && !config.targetError && (
-                    <iframe
-                      key={`${selected}:${generation}`}
-                      ref={frame}
-                      title={`Tunnelde 场景：${scene.title}`}
-                      src={`${config.rendererOrigin}/renderer.html?session=${session.current}&generation=${generation}&parentOrigin=${encodeURIComponent(location.origin)}`}
-                      style={{
-                        width: parameters.width,
-                        height: parameters.height,
-                      }}
-                      onLoad={() =>
-                        frame.current?.contentWindow?.postMessage(
-                          {
-                            type: "apply",
-                            version: 1,
-                            session: session.current,
-                            generation,
-                            scenario: scene,
-                            parameters,
-                          },
-                          config.rendererOrigin,
-                        )
-                      }
-                    />
-                  )}
-                  {!ready && (
-                    <div className="frame-loading">
-                      <LoaderCircle className="spin" size={20} />
-                      <span>正在挂载生产界面…</span>
+                  <div
+                    className="frame-container"
+                    style={{
+                      width: parameters.width,
+                      height: parameters.height,
+                      transform: `scale(${scale})`,
+                    }}
+                  >
+                    <div className="frame-chrome">
+                      <code>tunnelde / {selected}</code>
                     </div>
-                  )}
+                    {config && scene && !config.targetError && (
+                      <iframe
+                        key={`${projectGeneration}:${selected}:${generation}`}
+                        ref={frame}
+                        title={`Tunnelde 场景：${scene.title}`}
+                        src={`${config.rendererOrigin}/renderer.html?session=${session.current}&generation=${generation}&parentOrigin=${encodeURIComponent(location.origin)}`}
+                        style={{
+                          width: parameters.width,
+                          height: parameters.height,
+                        }}
+                        onLoad={() =>
+                          frame.current?.contentWindow?.postMessage(
+                            {
+                              type: "apply",
+                              version: 1,
+                              session: session.current,
+                              generation,
+                              scenario: scene,
+                              parameters,
+                            },
+                            config.rendererOrigin,
+                          )
+                        }
+                      />
+                    )}
+                    {!ready && (
+                      <div className="frame-loading">
+                        <LoaderCircle className="spin" size={20} />
+                        <span>正在挂载生产界面…</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="scene-pagination">
@@ -1007,7 +1293,22 @@ export function Workbench() {
             </>
           )}
         </main>
-        <aside className="inspector">
+        <aside
+          id="inspector"
+          className="inspector"
+          hidden={!inspectorVisible}
+        >
+          <div className="inspector-heading">
+            <span>检查器</span>
+            <button
+              className="panel-toggle"
+              aria-label="关闭检查器"
+              title="关闭检查器"
+              onClick={() => setInspectorOpen(false)}
+            >
+              <X size={15} />
+            </button>
+          </div>
           <div className="inspector-tabs">
             <button
               className={tool === "parameters" ? "selected" : ""}
@@ -1035,13 +1336,7 @@ export function Workbench() {
           <div className="inspector-body">
             {tool === "parameters" ? (
               <>
-                <div className="section-caption">
-                  场景配置 <span>LOCAL</span>
-                </div>
                 <h2>{scene?.title}</h2>
-                <p className="muted">
-                  同一界面，多种状态。每次切换创建独立的渲染上下文。
-                </p>
                 <label className="control-label">数据预设</label>
                 <div className="preset-grid">
                   {scene?.presets.map((preset) => (
@@ -1151,24 +1446,6 @@ export function Workbench() {
                   }}
                 />
                 <div className="inspector-rule" />
-                <div className="section-caption">运行目标</div>
-                <div className="target-badges">
-                  {scene?.targets.map((target) => (
-                    <span key={target}>
-                      {target === "browser"
-                        ? "浏览器"
-                        : target === "native-mock"
-                          ? "原生模拟"
-                          : "真实服务"}
-                    </span>
-                  ))}
-                </div>
-                <div className="inspector-note">
-                  <Code2 size={15} />
-                  <p>
-                    场景复用生产组件。模拟操作与真实服务的验收结果分别记录。
-                  </p>
-                </div>
                 <Action
                   onClick={() => {
                     setParameters(DEFAULT_PARAMETERS);
@@ -1190,18 +1467,28 @@ export function Workbench() {
                   </pre>
                 ))}
                 <Action
-                  onClick={() =>
-                    frame.current?.contentWindow?.postMessage(
-                      {
-                        version: 1,
-                        session: session.current,
-                        generation,
-                        type: "snapshot",
-                      },
-                      config!.rendererOrigin,
-                    )
-                  }
-                  disabled={!ready}
+                  onClick={() => {
+                    if (section === "native")
+                      void perform("snapshot", async () =>
+                        setSnapshot(
+                          await api("native/action", {
+                            method: "debug.snapshot",
+                            params: { generation: state.native.generation },
+                          }),
+                        ),
+                      );
+                    else
+                      frame.current?.contentWindow?.postMessage(
+                        {
+                          version: 1,
+                          session: session.current,
+                          generation,
+                          type: "snapshot",
+                        },
+                        config!.rendererOrigin,
+                      );
+                  }}
+                  disabled={section === "native" ? !nativeReady : !ready}
                 >
                   <Code2 size={13} />
                   读取场景状态
@@ -1217,120 +1504,58 @@ export function Workbench() {
                   工作区 {config?.source.dirtyFingerprint.slice(0, 12)}
                 </p>
               </>
-            ) : (
-              <>
-                <div className="section-caption">人工验收</div>
-                <h2>{scene?.title}</h2>
-                <div className="checklist">
-                  {scene?.checklist.map((item) => (
-                    <label key={item}>
-                      <input
-                        type="checkbox"
-                        checked={checklist.includes(item)}
-                        onChange={(event) =>
-                          setChecklist((previous) =>
-                            event.target.checked
-                              ? [...previous, item]
-                              : previous.filter((value) => value !== item),
-                          )
-                        }
-                      />
-                      {item}
-                    </label>
-                  ))}
-                </div>
-                <label className="control-label">验收备注</label>
-                <textarea
-                  aria-label="验收备注"
-                  placeholder="记录发现的问题、操作步骤与预期…"
-                  value={note}
-                  onChange={(event) => setNote(event.target.value)}
-                  rows={5}
+            ) : null}
+            {config && scene && (
+              <div hidden={tool !== "acceptance"}>
+                <AcceptancePanel
+                  key={`${selected}:${section === "native" ? mode : "browser"}:${JSON.stringify(parameters)}:${acceptanceSource?.path}:${acceptanceSource?.revision}:${acceptanceSource?.dirtyFingerprint}`}
+                  scene={scene}
+                  parameters={parameters}
+                  target={section === "native" ? mode : "browser"}
+                  source={acceptanceSource!}
+                  ticket={ticket}
+                  generation={state.native.generation}
+                  records={state.records}
+                  captureRequest={captureRequest}
+                  capture={captureCurrent}
+                  canCapture={
+                    section === "native"
+                      ? nativeReady
+                      : !!config && !!scene && !config.targetError
+                  }
+                  canPass={section === "native" ? nativeReady : ready}
+                  locale={uiLocale}
+                  refresh={refresh}
                 />
-                <div className="acceptance-buttons">
-                  <button
-                    className="accept-pass"
-                    disabled={
-                      !!busy || (section === "native" ? !nativeReady : !ready)
-                    }
-                    onClick={() => void saveAcceptance("passed")}
-                  >
-                    <Check size={14} />
-                    通过
-                  </button>
-                  <button
-                    disabled={!!busy}
-                    onClick={() => void saveAcceptance("failed")}
-                  >
-                    <X size={14} />
-                    失败
-                  </button>
-                  <button
-                    disabled={!!busy}
-                    onClick={() => void saveAcceptance("blocked")}
-                  >
-                    阻塞
-                  </button>
-                  <button
-                    disabled={!!busy}
-                    onClick={() => void saveAcceptance("pending")}
-                  >
-                    待检查
-                  </button>
-                </div>
-                {screenshots.map((name) => (
-                  <a
-                    key={name}
-                    href={`/artifacts/${name}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <img
-                      className="artifact-preview"
-                      src={`/artifacts/${name}`}
-                      alt="验收截图"
-                    />
-                  </a>
-                ))}
-                <div className="inspector-rule" />
-                <div className="section-caption">最近验收</div>
-                {state.records
-                  .filter((record) => record.scenarioId === selected)
-                  .slice(-8)
-                  .reverse()
-                  .map((record) => (
-                    <div className="acceptance-entry" key={record.id}>
-                      <span className={`run-status ${record.status}`}>
-                        {labels[record.status]}
-                      </span>
-                      <small>
-                        {record.target} · {labels[record.parameters.preset]}
-                      </small>
-                      <p>{record.note || "无备注"}</p>
-                      <time>{new Date(record.updatedAt).toLocaleString()}</time>
-                    </div>
-                  ))}
-              </>
+              </div>
             )}
           </div>
         </aside>
       </div>
+      {settingsOpen && (
+        <ProjectSettingsDialog
+          locale={uiLocale}
+          onClose={() => setSettingsOpen(false)}
+          onApply={async () => {
+            const next = await api<Config>("config");
+            setConfig(next);
+            setReady(false);
+            setTicket(undefined);
+            setGeneration((value) => value + 1);
+            setProjectGeneration((value) => value + 1);
+            setChecked(new Set());
+            setSnapshot(undefined);
+            setDiagnostics([]);
+            await refresh();
+          }}
+        />
+      )}
       <footer className="statusbar">
+        <span>{scenes.length} 个内置场景</span>
         <span>
-          <span className="green-dot" />
-          本地服务已连接
-        </span>
-        <span>
-          <Layers3 size={11} />
-          {scenes.length} 个内置场景
-        </span>
-        <span>
-          <FlaskConical size={11} />
           {state.runs.filter((item) => item.status === "running").length} 运行中
         </span>
         <span className="status-spacer" />
-        <span>协议 v1</span>
-        <span>源码模式</span>
         {ready && <span data-testid="scene-ready">场景已就绪</span>}
       </footer>
     </div>,
@@ -1377,20 +1602,17 @@ function TestNode({
   return (
     <div className="test-node">
       <div className="test-node-row">
-        <button
-          onClick={() => setOpen((value) => !value)}
-          aria-label={`展开 ${item.label}`}
-        >
-          {item.children ? (
-            open ? (
-              <ChevronDown size={11} />
-            ) : (
-              <ChevronRight size={11} />
-            )
-          ) : (
-            <FileCode2 size={11} />
-          )}
-        </button>
+        {item.children ? (
+          <button
+            onClick={() => setOpen((value) => !value)}
+            aria-label={`展开 ${item.label}`}
+            aria-expanded={open}
+          >
+            {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </button>
+        ) : (
+          <FileCode2 size={11} aria-hidden="true" />
+        )}
         <input
           type="checkbox"
           aria-label={`选择 ${item.label}`}
@@ -1448,7 +1670,7 @@ function Empty({
   body: string;
 }) {
   return (
-    <div className="empty">
+    <div className="empty-state">
       {icon}
       <h2>{title}</h2>
       <p>{body}</p>

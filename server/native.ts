@@ -1,3 +1,4 @@
+import { DEFAULT_LAUNCH, type LaunchSettings } from "../shared/project";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { connect } from "node:net";
@@ -98,6 +99,7 @@ export class NativeManager {
     private data: string,
     private frontend: string,
     private changed: () => void,
+    private launch: LaunchSettings = DEFAULT_LAUNCH,
   ) {}
   private log = (line: string) => {
     this.logs.push(line);
@@ -193,11 +195,17 @@ export class NativeManager {
           "--no-watch",
           "--config",
           config,
+          "--",
+          ...this.launch.cargoArgs,
+          "--",
+          ...this.launch.appArgs,
         ],
         {
           cwd: this.target,
           signal: this.starting.signal,
+          color: true,
           env: {
+            ...this.launch.env,
             TUNNELDE_DATA_DIR: profile,
             TUNNELDE_PLUGINS_DIR: join(profile, "plugins"),
             TUNNELDE_DEBUGGER_ACTIVE: "1",
