@@ -40,7 +40,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "tsx": "^4.20.0",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "description": "A browser and Tauri workbench for Tunnelde development, test orchestration, isolated native scenarios and traceable acceptance evidence.",
   "homepage": "https://github.com/TunneldeDev/TunneldeDebugger#readme",
