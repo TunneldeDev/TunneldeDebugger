@@ -2,7 +2,17 @@
 
 [English](README.en-us.md)
 
+[![Desktop checks](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml/badge.svg)](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml)
+[![Release](https://img.shields.io/github/v/release/TunneldeDev/TunneldeDebugger?label=release)](https://github.com/TunneldeDev/TunneldeDebugger/releases/latest)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-5FA04E?logo=node.js&logoColor=white)](package.json)
+[![pnpm 10+](https://img.shields.io/badge/pnpm-10%2B-F69220?logo=pnpm&logoColor=white)](package.json)
+
+[使用指南](docs/zh-cn/guide.md) · [覆盖与验收](docs/zh-cn/validation.md) · [参与贡献](CONTRIBUTING.md) · [安全策略](SECURITY.md) · [更新记录](CHANGELOG.md)
+
 Tunnelde 的本地开发与验收工作台。React 工作台可在浏览器或 Tauri 桌面运行，共用 Node 服务，支持生产组件场景、统一测试侧栏、隔离原生实例及可追溯的验收记录。
+
+![TunneldeDebugger 工作台](docs/assets/workbench.png)
 
 ## 从源码启动
 
@@ -49,4 +59,4 @@ pnpm acceptance:native 'native:native-service#files'
 
 运行数据位于 `.tunnelde-debugger/`，包含运行记录、验收记录、实例配置、日志和产物；已加入 Git 忽略。关闭实例并备份所需报告后，可删除该目录。未完成任务在服务重启后标为“已中断”。
 
-此版本从源码运行，未制作安装包或 Release。Windows/Linux 原生功能保留源码适配，尚未实际验收。许可证 GPL-3.0-only。
+`v0.1.0` 是仅提供源码的 Release，不附带安装包。Windows/Linux 原生功能保留源码适配，尚未实际验收。许可证 GPL-3.0-only。

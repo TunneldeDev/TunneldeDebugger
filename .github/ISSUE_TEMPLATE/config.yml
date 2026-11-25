@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and workflow discussion
+    url: https://github.com/TunneldeDev/TunneldeDebugger/discussions
+    about: Ask usage questions, share setup notes or discuss an idea before filing a focused issue.
+  - name: Report a security vulnerability
+    url: https://github.com/TunneldeDev/TunneldeDebugger/security/advisories/new
+    about: Report vulnerabilities privately. Do not disclose security details in a public issue.
+  - name: Tunnelde product issues
+    url: https://github.com/TunneldeDev/Tunnelde/issues
+    about: Report defects in the Tunnelde application itself in the upstream repository.

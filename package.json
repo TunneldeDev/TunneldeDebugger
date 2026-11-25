@@ -41,5 +41,29 @@
     "@types/react-dom": "19.3.0",
     "tsx": "^4.20.0",
     "typescript": "5.9.3"
-  }
+  },
+  "description": "A browser and Tauri workbench for Tunnelde development, test orchestration, isolated native scenarios and traceable acceptance evidence.",
+  "homepage": "https://github.com/TunneldeDev/TunneldeDebugger#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TunneldeDev/TunneldeDebugger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TunneldeDev/TunneldeDebugger/issues"
+  },
+  "keywords": [
+    "acceptance-testing",
+    "debugging",
+    "desktop-app",
+    "developer-tools",
+    "playwright",
+    "react",
+    "rust",
+    "tauri",
+    "test-automation",
+    "testing",
+    "tunnelde",
+    "typescript"
+  ],
+  "packageManager": "pnpm@12.11.2"
 }

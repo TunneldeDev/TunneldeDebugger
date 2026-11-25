@@ -2,7 +2,17 @@
 
 [简体中文](README.md)
 
+[![Desktop checks](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml/badge.svg)](https://github.com/TunneldeDev/TunneldeDebugger/actions/workflows/desktop.yml)
+[![Release](https://img.shields.io/github/v/release/TunneldeDev/TunneldeDebugger?label=release)](https://github.com/TunneldeDev/TunneldeDebugger/releases/latest)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-5FA04E?logo=node.js&logoColor=white)](package.json)
+[![pnpm 10+](https://img.shields.io/badge/pnpm-10%2B-F69220?logo=pnpm&logoColor=white)](package.json)
+
+[Guide](docs/en-us/guide.md) · [Coverage and validation](docs/en-us/validation.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+
 A local development and acceptance workbench for Tunnelde. The React UI runs in a browser or a Tauri desktop window, sharing a Node service for production-component scenarios, test orchestration, isolated native instances and traceable acceptance records.
+
+![TunneldeDebugger workbench](docs/assets/workbench.png)
 
 ## Run from source
 
@@ -49,4 +59,4 @@ Read the [guide and architecture](docs/en-us/guide.md), [coverage and validation
 
 Local data lives in the ignored `.tunnelde-debugger/` directory: runs, acceptance records, instance profiles, logs and artifacts. Stop instances and back up reports before deleting it. Unfinished tasks become interrupted after a service restart.
 
-This version runs from source; no installers or Releases are provided. Windows/Linux native source adaptation is retained but has not been validated on those systems. Licensed GPL-3.0-only.
+`v0.1.0` is a source-only release with no installers attached. Windows/Linux native source adaptation is retained but has not been validated on those systems. Licensed GPL-3.0-only.

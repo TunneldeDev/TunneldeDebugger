@@ -1,0 +1,97 @@
+name: Bug report
+description: Report a reproducible defect in the workbench, desktop host, native runner or documentation.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove credentials, private host names, tokens and personal paths before submitting.
+
+        Security vulnerabilities must use the private advisory link in the security policy, not a public issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken, and what is the smallest user-visible symptom?
+      placeholder: A concise description of the defect.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Workbench UI
+        - Browser scenarios
+        - Desktop or Tauri host
+        - Native mock or real-service instances
+        - Test discovery and runners
+        - Acceptance records or screenshots
+        - Build, packaging or CI
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or revision
+      description: Release, commit SHA or branch where the issue reproduces.
+      placeholder: v0.1.0 or 765cb48
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and version, browser, Node, pnpm, Rust/Tauri version, display scale and target revision as applicable.
+      placeholder: |
+        OS: macOS 15.x / Apple Silicon
+        Browser: Chromium 1xx
+        Node: 24.x
+        pnpm: 12.x
+        Rust: 1.xx
+        Target revision: ...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide deterministic steps. Include the scenario ID and parameters when relevant.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Select ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the exact error, console output or a screenshot description.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Drag files here after reviewing them for secrets and private data.
+      render: shell
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed secrets, credentials and private host information.
+          required: true
+        - label: I can reproduce this on the stated revision.
+          required: true
