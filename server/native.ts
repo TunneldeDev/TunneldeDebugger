@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { connect } from "node:net";
 import { mkdir, readFile, writeFile, stat, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import type {
   NativeState,

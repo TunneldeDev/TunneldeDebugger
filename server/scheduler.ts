@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { JsonStore, sourceIdentity } from "./storage";
 import { Runner, collapseSelection } from "./runners";
+import { PublicError } from "./public-error";
 import type {
   RunEvent,
   TestItem,
@@ -48,7 +49,7 @@ export class Scheduler {
       status: "queued",
       events: [],
     };
-    if (!run.items.length) throw new Error("No tests selected");
+    if (!run.items.length) throw new PublicError("No tests selected");
     this.runs.push(run);
     await this.save();
     this.changed();
@@ -64,7 +65,7 @@ export class Scheduler {
   }
   async cancel(id: string) {
     const run = this.runs.find((item) => item.id === id);
-    if (!run) throw new Error("Unknown run");
+    if (!run) throw new PublicError("Unknown run");
     if (run.status === "queued") {
       run.status = "cancelled";
       run.finishedAt = new Date().toISOString();

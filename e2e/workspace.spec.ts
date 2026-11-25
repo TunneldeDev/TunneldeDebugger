@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { selectOption } from "./helpers";
 test("inspector stays docked without covering the movable iframe; close and controls remain usable", async ({
   page,
 }, testInfo) => {

@@ -1,5 +1,6 @@
 import type { AcceptanceRecord } from "../shared/protocol";
 import { JsonStore } from "./storage";
+import { PublicError } from "./public-error";
 
 /** Serialize read/modify/write operations; publish only after durable storage succeeds. */
 export class AcceptanceStore {
@@ -32,11 +33,11 @@ export class AcceptanceStore {
       const index = records.findIndex((item) => item.id === record.id);
       if (index >= 0) {
         if (records[index]!.deletedAt)
-          throw new Error(
+          throw new PublicError(
             "记录已删除，请先恢复 / Record deleted; restore it first",
           );
         if (records[index]!.updatedAt !== expected)
-          throw new Error(
+          throw new PublicError(
             "记录已被修改，请重新打开后编辑 / Record changed; reopen it before editing",
           );
         record.updatedAt = new Date(
@@ -44,7 +45,7 @@ export class AcceptanceStore {
         ).toISOString();
         records[index] = record;
       } else {
-        if (expected) throw new Error("记录不存在 / Record not found");
+        if (expected) throw new PublicError("记录不存在 / Record not found");
         records.push(record);
       }
       return structuredClone(record);
@@ -54,9 +55,9 @@ export class AcceptanceStore {
     return this.mutate((records) => {
       const record = records.find((item) => item.id === id);
       if (!record || record.deletedAt)
-        throw new Error("记录不存在 / Record not found");
+        throw new PublicError("记录不存在 / Record not found");
       if (record.updatedAt !== expected)
-        throw new Error(
+        throw new PublicError(
           "记录已被修改，请刷新后删除 / Record changed; refresh before deleting",
         );
       record.deletedAt = new Date().toISOString();
@@ -66,7 +67,7 @@ export class AcceptanceStore {
   restore(id: string) {
     return this.mutate((records) => {
       const record = records.find((item) => item.id === id);
-      if (!record) throw new Error("记录不存在 / Record not found");
+      if (!record) throw new PublicError("记录不存在 / Record not found");
       delete record.deletedAt;
       return structuredClone(record);
     });

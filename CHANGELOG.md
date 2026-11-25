@@ -14,6 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Migrated the development servers from the deprecated Vite HMR options to `server.ws`.
 
+### Fixed
+
+- Restricted HTTP failures to explicitly public messages, removed unused imports and redundant conditionals, and pinned workflow actions to immutable commits after the first CodeQL scan.
+
 ## [0.1.0] - 2026-11-25
 
 ### Added

@@ -2,6 +2,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { stat, readFile } from "node:fs/promises";
 import { JsonStore } from "./storage";
 import { DEFAULT_LAUNCH, type ProjectSettings } from "../shared/project";
+import { PublicError } from "./public-error";
 export function settingsStore(data: string, fallbackTarget: string) {
   return new JsonStore<ProjectSettings>(join(data, "project.json"), {
     targetPath: fallbackTarget,
@@ -11,20 +12,20 @@ export function settingsStore(data: string, fallbackTarget: string) {
 }
 export function validateSettings(value: unknown): ProjectSettings {
   if (!value || typeof value !== "object")
-    throw new Error("配置无效 / Invalid settings");
+    throw new PublicError("配置无效 / Invalid settings");
   const input = value as ProjectSettings;
   if (
     typeof input.targetPath !== "string" ||
     !isAbsolute(input.targetPath) ||
     input.targetPath.includes("\0")
   )
-    throw new Error("请输入项目绝对路径 / Absolute project path required");
+    throw new PublicError("请输入项目绝对路径 / Absolute project path required");
   if (
     !Number.isInteger(input.servicePort) ||
     input.servicePort < 1024 ||
     input.servicePort > 65532
   )
-    throw new Error("服务端口必须在 1024–65532 之间 / Invalid service port");
+    throw new PublicError("服务端口必须在 1024–65532 之间 / Invalid service port");
   const list = (value: unknown) => {
     if (
       !Array.isArray(value) ||
@@ -33,7 +34,7 @@ export function validateSettings(value: unknown): ProjectSettings {
         (x) => typeof x !== "string" || x.length > 4096 || x.includes("\0"),
       )
     )
-      throw new Error(
+      throw new PublicError(
         "启动参数必须是字符串数组 / Launch arguments must be a string array",
       );
     return value as string[];
@@ -45,7 +46,7 @@ export function validateSettings(value: unknown): ProjectSettings {
     !launch.env ||
     Array.isArray(launch.env)
   )
-    throw new Error("环境变量必须是对象 / Environment must be an object");
+    throw new PublicError("环境变量必须是对象 / Environment must be an object");
   const cargoArgs = list(launch.cargoArgs),
     appArgs = list(launch.appArgs);
   if (
@@ -58,7 +59,7 @@ export function validateSettings(value: unknown): ProjectSettings {
         arg.startsWith("-F"),
     )
   )
-    throw new Error(
+    throw new PublicError(
       "不能通过参数覆盖调试构建与 feature / Debug build and feature are managed by Debugger",
     );
   const env: Record<string, string> = {};
@@ -69,9 +70,9 @@ export function validateSettings(value: unknown): ProjectSettings {
       value.includes("\0") ||
       value.length > 8192
     )
-      throw new Error("环境变量无效 / Invalid environment variable");
+      throw new PublicError("环境变量无效 / Invalid environment variable");
     if (/^(?:TUNNELDE_|VITE_|TAURI_)/.test(key))
-      throw new Error(
+      throw new PublicError(
         "隔离环境变量由 Debugger 管理 / Isolation variables are managed by Debugger",
       );
     env[key] = value;

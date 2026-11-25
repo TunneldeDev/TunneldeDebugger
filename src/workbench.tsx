@@ -14,7 +14,6 @@ import {
   Camera,
   Hand,
   Move,
-  Check,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -1521,7 +1520,7 @@ export function Workbench() {
                   canCapture={
                     section === "native"
                       ? nativeReady
-                      : !!config && !!scene && !config.targetError
+                      : !config.targetError
                   }
                   canPass={section === "native" ? nativeReady : ready}
                   locale={uiLocale}

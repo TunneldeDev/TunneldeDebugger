@@ -28,6 +28,7 @@ import { Runner, flattenTests } from "./runners";
 import { Scheduler } from "./scheduler";
 import { NativeRunner } from "./native-runner";
 import { NativeManager } from "./native";
+import { PublicError } from "./public-error";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const argument = (name: string) => {
   const index = process.argv.indexOf(name);
@@ -158,7 +159,8 @@ async function createRenderer() {
     });
     await frameServer.listen();
   } catch (error) {
-    targetError = String(error);
+    console.error("Failed to create target renderer", error);
+    targetError = "Target failed to start; see the server console for details.";
   }
 }
 await createRenderer();
@@ -176,12 +178,12 @@ async function body(
   for await (const chunk of request) {
     bytes += chunk.length;
     if (bytes > (request.url === "/api/attachments" ? 12 : 1) * 1024 * 1024)
-      throw new Error("Request body too large");
+      throw new PublicError("Request body too large");
     chunks.push(chunk);
   }
   const value = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
   if (!value || Array.isArray(value) || typeof value !== "object")
-    throw new Error("Expected object");
+    throw new PublicError("Expected object");
   return value;
 }
 function json(response: ServerResponse, value: unknown, status = 200) {
@@ -198,23 +200,23 @@ function checkedRequest(request: IncomingMessage) {
       request.socket.remoteAddress ?? "",
     )
   )
-    throw new Error("Loopback only");
+    throw new PublicError("Loopback only");
   if (
     request.headers.host !== `127.0.0.1:${port}` &&
     request.headers.host !== `localhost:${port}`
   )
-    throw new Error("Unexpected Host");
+    throw new PublicError("Unexpected Host");
   if (
     request.headers.origin &&
     request.headers.origin !== origin &&
     request.headers.origin !== `http://localhost:${port}`
   )
-    throw new Error("Cross-origin access rejected");
+    throw new PublicError("Cross-origin access rejected");
   if (
     request.method !== "GET" &&
     !request.headers["content-type"]?.startsWith("application/json")
   )
-    throw new Error("JSON content type required");
+    throw new PublicError("JSON content type required");
 }
 const server = createHttpServer(async (request, response) => {
   const url = new URL(request.url ?? "/", origin);
@@ -231,7 +233,7 @@ const server = createHttpServer(async (request, response) => {
   try {
     checkedRequest(request);
     if (reconfiguring && request.method !== "GET")
-      throw new Error("正在应用项目配置 / Project reconfiguration in progress");
+      throw new PublicError("正在应用项目配置 / Project reconfiguration in progress");
     const readOnly =
       [
         "/api/events",
@@ -308,7 +310,7 @@ const server = createHttpServer(async (request, response) => {
           discovering.size ||
           ["starting", "applying", "ready"].includes(native.state.state)
         )
-          throw new Error(
+          throw new PublicError(
             "请先停止实例和测试再修改配置 / Stop instances and tests before reconfiguration",
           );
         await projectStore.write(next);
@@ -368,7 +370,7 @@ const server = createHttpServer(async (request, response) => {
         (run) => run.id === url.pathname.split("/")[3],
       );
       if (!run?.eventLog || basename(run.eventLog) !== run.eventLog)
-        throw new Error("No full event journal for this run");
+        throw new PublicError("No full event journal for this run");
       const bytes = await readFile(join(data, "logs", run.eventLog));
       response.writeHead(200, {
         "Content-Type": "application/x-ndjson",
@@ -415,8 +417,8 @@ const server = createHttpServer(async (request, response) => {
       const input = await body(request);
       const kind = input.runner as RunnerKind;
       if (!["vitest", "node", "rust", "playwright", "native"].includes(kind))
-        throw new Error("Unknown test runner");
-      if (discovering.has(kind)) throw new Error("Discovery already running");
+        throw new PublicError("Unknown test runner");
+      if (discovering.has(kind)) throw new PublicError("Discovery already running");
       discovering.add(kind);
       try {
         const items = await (
@@ -438,11 +440,11 @@ const server = createHttpServer(async (request, response) => {
         !Array.isArray(input.ids) ||
         !input.ids.every((id) => typeof id === "string")
       )
-        throw new Error("Expected test IDs");
+        throw new PublicError("Expected test IDs");
       const available = flattenTests([...testTree.values()].flat());
       const selected = input.ids.map((id) => {
         const item = available.find((item) => item.id === id);
-        if (!item) throw new Error(`Unknown test ID: ${id}`);
+        if (!item) throw new PublicError(`Unknown test ID: ${id}`);
         return item;
       });
       json(response, await scheduler.enqueue(selected));
@@ -498,7 +500,7 @@ const server = createHttpServer(async (request, response) => {
         ? acceptance.list().find((record) => record.id === input.id)
         : undefined;
       if (input.id && !existing)
-        throw new Error("记录不存在 / Record not found");
+        throw new PublicError("记录不存在 / Record not found");
       const context = existing ?? input;
       const scenario = scenarioById(String(context.scenarioId));
       const parameters = validateParameters(context.parameters);
@@ -511,7 +513,7 @@ const server = createHttpServer(async (request, response) => {
           String(input.priority ?? existing?.priority ?? "P2"),
         )
       )
-        throw new Error("Invalid acceptance result");
+        throw new PublicError("Invalid acceptance result");
       const browserEvidence = browserReady.get(String(input.ticket));
       const nativeMatches =
         native.state.state === "ready" &&
@@ -535,11 +537,11 @@ const server = createHttpServer(async (request, response) => {
             JSON.stringify(browserEvidence.parameters) !==
               JSON.stringify(parameters))
         )
-          throw new Error(
+          throw new PublicError(
             "场景尚未就绪，仍可保存问题或阻塞记录 / Scene not ready for a pass",
           );
         if (targetKind !== "browser" && !nativeMatches)
-          throw new Error(
+          throw new PublicError(
             "原生场景尚未就绪，仍可保存问题或阻塞记录 / Native scene not ready for a pass",
           );
         const currentSource = await sourceIdentity(target);
@@ -552,7 +554,7 @@ const server = createHttpServer(async (request, response) => {
           currentSource.dirtyFingerprint !== source.dirtyFingerprint ||
           liveSource.dirtyFingerprint !== source.dirtyFingerprint
         )
-          throw new Error(
+          throw new PublicError(
             "源码已变化，请在当前场景新建验收记录 / Source changed; create a new acceptance record",
           );
       }
@@ -580,7 +582,7 @@ const server = createHttpServer(async (request, response) => {
           );
         })
       )
-        throw new Error(
+        throw new PublicError(
           "图片不属于这条记录的场景与源码 / Attachment does not match this record",
         );
       await Promise.all(
@@ -628,15 +630,15 @@ const server = createHttpServer(async (request, response) => {
         ? acceptance.list().find((record) => record.id === input.recordId)
         : undefined;
       if (input.recordId && !existing)
-        throw new Error("记录不存在 / Record not found");
+        throw new PublicError("记录不存在 / Record not found");
       const context = existing ?? input;
       const scenario = scenarioById(String(context.scenarioId));
       const parameters = validateParameters(context.parameters);
       if (!scenario.targets.includes(context.target as TargetKind))
-        throw new Error("Invalid target");
+        throw new PublicError("Invalid target");
       const image = String(input.image ?? "");
       if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image))
-        throw new Error("仅接受 PNG 图片 / PNG image required");
+        throw new PublicError("仅接受 PNG 图片 / PNG image required");
       const bytes = Buffer.from(image.slice(image.indexOf(",") + 1), "base64");
       if (
         bytes.length < 24 ||
@@ -650,7 +652,7 @@ const server = createHttpServer(async (request, response) => {
         bytes.readUInt32BE(16) > 8192 ||
         bytes.readUInt32BE(20) > 8192
       )
-        throw new Error("图片无效或超过 8 MiB / Invalid image or over 8 MiB");
+        throw new PublicError("图片无效或超过 8 MiB / Invalid image or over 8 MiB");
       const name = `evidence-${randomUUID()}.png`;
       const browserEvidence = browserReady.get(String(input.ticket));
       const source =
@@ -685,7 +687,7 @@ const server = createHttpServer(async (request, response) => {
       return;
     }
     if (url.pathname.startsWith("/api/native/") && scheduler.nativeBusy)
-      throw new Error(
+      throw new PublicError(
         "Native target is owned by a scheduled test; cancel it before manual operations",
       );
     if (url.pathname === "/api/native/start") {
@@ -697,7 +699,7 @@ const server = createHttpServer(async (request, response) => {
         !["native-mock", "native-service"].includes(mode) ||
         !scenario.targets.includes(mode)
       )
-        throw new Error("Unsupported native scenario");
+        throw new PublicError("Unsupported native scenario");
       await ensureNativeFrontend();
       json(response, await native.start(mode, scenario, parameters));
       return;
@@ -706,7 +708,7 @@ const server = createHttpServer(async (request, response) => {
       const input = await body(request);
       const scenario = scenarioById(String(input.scenarioId));
       if (native.state.mode === "native-service")
-        throw new Error(
+        throw new PublicError(
           "Real service scenes require restart with a fresh profile",
         );
       json(
@@ -732,7 +734,7 @@ const server = createHttpServer(async (request, response) => {
           "debug.events",
         ].includes(String(input.method))
       )
-        throw new Error("Unregistered native action");
+        throw new PublicError("Unregistered native action");
       json(
         response,
         ["debug.present", "debug.check"].includes(String(input.method))
@@ -753,7 +755,7 @@ const server = createHttpServer(async (request, response) => {
         input.generation !== before.generation ||
         JSON.stringify(input.parameters) !== JSON.stringify(before.parameters)
       )
-        throw new Error(
+        throw new PublicError(
           "Native screenshot does not match the selected scenario",
         );
       const artifact = await native.capture();
@@ -761,7 +763,7 @@ const server = createHttpServer(async (request, response) => {
         before.runId !== native.state.runId ||
         before.generation !== native.state.generation
       )
-        throw new Error("Native scene changed during capture");
+        throw new PublicError("Native scene changed during capture");
       artifacts[artifact] = {
         scenarioId: native.state.scenarioId!,
         target: native.state.mode!,
@@ -774,14 +776,14 @@ const server = createHttpServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/capture") {
-      throw new Error(
+      throw new PublicError(
         "请从当前场景截图或上传图片 / Capture the live scene or attach an image",
       );
     }
     if (url.pathname.startsWith("/artifacts/")) {
       const name = url.pathname.slice(11);
       if (basename(name) !== name || !name.endsWith(".png"))
-        throw new Error("Invalid artifact");
+        throw new PublicError("Invalid artifact");
       response.writeHead(200, {
         "Content-Type": "image/png",
         "X-Content-Type-Options": "nosniff",
@@ -791,11 +793,12 @@ const server = createHttpServer(async (request, response) => {
     }
     json(response, { error: "Not found" }, 404);
   } catch (error) {
-    json(
-      response,
-      { error: error instanceof Error ? error.message : String(error) },
-      400,
-    );
+    if (error instanceof PublicError) {
+      json(response, { error: error.publicMessage }, error.status);
+      return;
+    }
+    console.error("Request failed", error);
+    json(response, { error: "Request failed" }, 500);
   }
 });
 server.listen(port, "127.0.0.1", () =>
