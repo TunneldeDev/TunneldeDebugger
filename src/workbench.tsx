@@ -154,18 +154,10 @@ export function Workbench() {
   const [snapshot, setSnapshot] = useState<unknown>();
   const searchInput = useRef<HTMLInputElement>(null);
   const canvas = useRef<HTMLDivElement>(null);
-  const inspector = useRef<HTMLElement>(null);
   const [panMode, setPanMode] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panDrag = useRef<
     { x: number; y: number; originX: number; originY: number } | undefined
-  >(undefined);
-  const [inspectorPosition, setInspectorPosition] = useState<{
-    left: number;
-    top: number;
-  }>();
-  const inspectorDrag = useRef<
-    { x: number; y: number; left: number; top: number } | undefined
   >(undefined);
   const recenter = () => {
     setPan({ x: 0, y: 0 });
@@ -181,8 +173,9 @@ export function Workbench() {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [catalogOpen, setCatalogOpen] = useState<boolean>();
   const [inspectorOpen, setInspectorOpen] = useState<boolean>();
-  const catalogVisible = catalogOpen ?? windowWidth >= 850;
   const inspectorVisible = inspectorOpen ?? false;
+  const catalogOverlay = windowWidth < 850 || (inspectorVisible && windowWidth < 1180);
+  const catalogVisible = catalogOpen ?? !catalogOverlay;
   // Keep the renderer's layout viewport intact; only scale its presentation.
   const frameWidth = parameters.width + 2;
   const frameHeight = parameters.height + 33;
@@ -205,14 +198,10 @@ export function Workbench() {
   useEffect(() => {
     const resize = () => {
       setWindowWidth(window.innerWidth);
-      setInspectorPosition(undefined);
     };
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, []);
-  useEffect(() => {
-    setInspectorPosition(undefined);
-  }, [windowWidth]);
   useEffect(() => {
     const element = canvas.current;
     if (!element) return;
@@ -540,7 +529,7 @@ export function Workbench() {
             <span>原生</span>
           </button>
         </nav>
-        {windowWidth < 850 && catalogVisible && (
+        {catalogOverlay && catalogVisible && (
           <button
             className="panel-scrim"
             aria-label="收起侧栏"
@@ -1306,82 +1295,11 @@ export function Workbench() {
         </main>
         <aside
           id="inspector"
-          ref={inspector}
           className="inspector"
           hidden={!inspectorVisible}
-          style={
-            inspectorPosition
-              ? {
-                  left: inspectorPosition.left,
-                  top: inspectorPosition.top,
-                  right: "auto",
-                }
-              : undefined
-          }
         >
-          <div
-            className="inspector-handle"
-            aria-label="拖动检查器"
-            onPointerDown={(event) => {
-              if ((event.target as Element).closest("button")) return;
-              event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              const box = inspector.current!.getBoundingClientRect(),
-                layout =
-                  inspector.current!.parentElement!.getBoundingClientRect();
-              inspectorDrag.current = {
-                x: event.clientX,
-                y: event.clientY,
-                left: box.left - layout.left,
-                top: box.top - layout.top,
-              };
-            }}
-            onPointerMove={(event) => {
-              const drag = inspectorDrag.current;
-              if (!drag) return;
-              const layout = inspector.current!.parentElement!;
-              setInspectorPosition({
-                left: Math.max(
-                  0,
-                  Math.min(
-                    layout.clientWidth - inspector.current!.offsetWidth,
-                    drag.left + event.clientX - drag.x,
-                  ),
-                ),
-                top: Math.max(
-                  0,
-                  Math.min(
-                    layout.clientHeight - 100,
-                    drag.top + event.clientY - drag.y,
-                  ),
-                ),
-              });
-            }}
-            onPointerUp={() => {
-              inspectorDrag.current = undefined;
-            }}
-            onPointerCancel={() => {
-              inspectorDrag.current = undefined;
-            }}
-          >
-            <span>
-              <Move size={12} />
-              检查器
-            </span>
-            <button
-              className="panel-toggle"
-              aria-label="重置检查器位置"
-              title="重置检查器位置"
-              onClick={() => {
-                setInspectorPosition(undefined);
-                if (inspector.current) {
-                  inspector.current.style.width = "";
-                  inspector.current.style.height = "";
-                }
-              }}
-            >
-              <Maximize2 size={13} />
-            </button>
+          <div className="inspector-heading">
+            <span>检查器</span>
             <button
               className="panel-toggle"
               aria-label="关闭检查器"

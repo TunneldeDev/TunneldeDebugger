@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { selectOption } from "./helpers";
-test("iframe and inspector can move independently; close remains reachable and controls do not distort", async ({
+test("inspector stays docked without covering the movable iframe; close and controls remain usable", async ({
   page,
 }, testInfo) => {
   await page.goto("/?scene=forms");
@@ -14,20 +14,14 @@ test("iframe and inspector can move independently; close remains reachable and c
   const canvas = page.locator(".preview-canvas");
   const before = (await canvas.boundingBox())!;
   await page.getByRole("button", { name: "记录问题", exact: true }).click();
-  expect((await canvas.boundingBox())!.width).toBe(before.width);
-  await expect(
-    page.getByRole("button", { name: "关闭检查器", exact: true }),
-  ).toBeVisible();
   const inspector = page.locator("#inspector");
-  const original = (await inspector.boundingBox())!;
-  const handle = (await page
-    .getByLabel("拖动检查器", { exact: true })
-    .boundingBox())!;
-  await page.mouse.move(handle.x + 60, handle.y + 16);
-  await page.mouse.down();
-  await page.mouse.move(handle.x - 80, handle.y + 60, { steps: 5 });
-  await page.mouse.up();
-  expect((await inspector.boundingBox())!.x).toBeLessThan(original.x - 80);
+  const dock = (await inspector.boundingBox())!;
+  const preview = (await canvas.boundingBox())!;
+  expect(preview.width).toBeLessThan(before.width);
+  expect(preview.x + preview.width).toBeLessThanOrEqual(dock.x + 1);
+  await expect(inspector).toHaveCSS("position", "static");
+  await expect(inspector).toHaveCSS("resize", "none");
+  await expect(page.getByLabel("拖动检查器", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "关闭检查器", exact: true }).click();
   await expect(inspector).toBeHidden();
   const titlebar = (await page.locator(".frame-chrome").boundingBox())!;
@@ -85,6 +79,19 @@ test("iframe and inspector can move independently; close remains reachable and c
     const close = page.getByRole("button", { name: "关闭检查器", exact: true });
     const closeBox = (await close.boundingBox())!;
     expect(closeBox.x + closeBox.width).toBeLessThanOrEqual(width);
+    const panelBox = (await inspector.boundingBox())!;
+    const previewBox = (await canvas.boundingBox())!;
+    expect(closeBox.y).toBeGreaterThanOrEqual(0);
+    expect(closeBox.y + closeBox.height).toBeLessThanOrEqual(800);
+    expect(
+      previewBox.x + previewBox.width <= panelBox.x + 1 ||
+      previewBox.y + previewBox.height <= panelBox.y + 1,
+    ).toBe(true);
+    await expect(inspector).toHaveCSS("position", "static");
+    await expect(
+      page.frameLocator("iframe").getByLabel("名称", { exact: true }),
+    ).toHaveValue("Move without resetting");
+    await page.screenshot({ path: testInfo.outputPath(`docked-${width}.png`) });
     await close.click();
   }
   await page.getByLabel("数据预设", { exact: true }).focus();

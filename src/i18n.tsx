@@ -63,9 +63,7 @@ export const english: Record<string, string> = {
   拖动画布: "Pan canvas",
   拖动画布区域: "Canvas drag area",
   居中画布: "Center canvas",
-  拖动检查器: "Move inspector",
   关闭检查器: "Close inspector",
-  重置检查器位置: "Reset inspector position",
 
   记录问题: "Report an issue",
   编辑记录: "Edit record",
