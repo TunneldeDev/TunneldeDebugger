@@ -18,7 +18,7 @@
 
 ## 项目配置与桌面操作
 
-顶部 **项目配置** 提供本地 Tunnelde 绝对路径、服务端口、Cargo 参数、应用参数和环境变量。展开“当前接口与存储位置”查看 API、渲染器、原生前端、数据目录和配置文件。参数为 JSON 数组、环境变量为 JSON 对象，直接传给子进程。配置保存在本地 `project.json`。停止所有实例与测试后可切换项目；保存路径立即重建场景服务并清除旧测试发现缓存。没有 `src/debugger/index.tsx` 的普通项目，需要先在隔离副本应用 `integration/tunnelde.patch` 并安装依赖，Debugger 不会自动修改所选项目。
+顶部 **项目配置** 提供本地 Tunnelde 绝对路径、服务端口、Cargo 参数、应用参数和环境变量。展开“当前接口与存储位置”查看 API、渲染器、原生前端、数据目录和配置文件。参数为 JSON 数组、环境变量为 JSON 对象，直接传给子进程。配置保存在本地 `project.json`。停止所有实例与测试后可切换项目；保存路径立即重建场景服务并清除旧测试发现缓存。目标项目需包含 `src/debugger/index.tsx`，适配器已合入上游 dev；旧版项目可先使用 `pnpm setup:target` 创建含适配器及滚动修复的隔离目标，再选择其路径。Debugger 不会自动修改所选项目；已有隔离目标也不会被 setup 自动更新。
 
 修改服务端口后需重启；渲染器、原生前端、HMR 使用端口 +1、+2、+3，均限定 loopback。`pnpm desktop --port 4880 --target /absolute/Tunnelde --data /absolute/debug-data` 使用匹配的 URL 与 CSP 启动独立桌面服务，命令行参数优先于已保存配置。Windows 使用跨平台子进程启动器，取消时清理整棵进程树。GitHub Actions 检查 macOS、Windows、Linux 的工作台及桌面源码；非 macOS 原生截图仍需上传系统截图，各平台实际验收状态单独记录。
 

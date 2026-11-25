@@ -19,7 +19,7 @@ pnpm dev
 pnpm desktop
 ```
 
-浏览器打开 <http://127.0.0.1:4760>。`setup:target` 在主仓库旁创建独立 worktree，应用随附适配补丁，不修改原工作区的文件。补丁固定到 `integration/base.json` 中的远端 dev 版本；升级基线应重新移植并验证补丁。
+浏览器打开 <http://127.0.0.1:4760>。`setup:target` 在主仓库旁创建独立 worktree，使用 `integration/base.json` 固定的远端 dev 版本，其中已包含开发适配器和设置分组滚动修复，不修改原工作区的文件。已有目标目录会复用，不会自动更新或覆盖其修改；升级时可指定一个新的目标目录。`integration/tunnelde.patch` 仅保留为早期基线的历史补丁，当前基线无需应用。
 
 可用 `pnpm dev --target /absolute/checkout --data /absolute/local-data --port 4760` 指定路径。环境变量为 `TUNNELDE_TARGET`、`TUNNELDE_DEBUGGER_DATA`。连续四个端口分别用于工作台、iframe、原生前端和 HMR。桌面包装目前使用默认端口。
 
@@ -45,8 +45,8 @@ pnpm acceptance:native     # 43 个原生模拟 + 5 个真实服务任务，需�
 pnpm acceptance:native 'native:native-service#files'
 ```
 
-参阅[操作与架构](docs/zh-cn/guide.md)、[覆盖与验收说明](docs/zh-cn/validation.md)及[主仓库适配补丁](integration/tunnelde.patch)。原生窗口检查需要可交互的桌面会话；截图失败会保留原因，不生成成功截图证据。
+参阅[操作与架构](docs/zh-cn/guide.md)、[覆盖与验收说明](docs/zh-cn/validation.md)及[主仓库适配说明](https://github.com/TunneldeDev/Tunnelde/blob/dev/docs/zh-cn/development/debugger.md)。原生窗口检查需要可交互的桌面会话；截图失败会保留原因，不生成成功截图证据。
 
 运行数据位于 `.tunnelde-debugger/`，包含运行记录、验收记录、实例配置、日志和产物；已加入 Git 忽略。关闭实例并备份所需报告后，可删除该目录。未完成任务在服务重启后标为“已中断”。
 
-此版本从源码运行，未制作安装包、未发布远端仓库。Windows/Linux 原生功能保留源码适配，尚未实际验收。许可证 GPL-3.0-only。
+此版本从源码运行，未制作安装包或 Release。Windows/Linux 原生功能保留源码适配，尚未实际验收。许可证 GPL-3.0-only。
