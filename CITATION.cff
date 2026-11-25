@@ -12,7 +12,7 @@ contact:
 repository-code: "https://github.com/TunneldeDev/TunneldeDebugger"
 url: "https://github.com/TunneldeDev/TunneldeDebugger"
 license: "GPL-3.0-only"
-version: "0.1.0"
+version: "0.1.1"
 date-released: "2026-11-25"
 keywords:
   - "acceptance testing"

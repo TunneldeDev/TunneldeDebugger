@@ -37,7 +37,7 @@ body:
     attributes:
       label: Version or revision
       description: Release, commit SHA or branch where the issue reproduces.
-      placeholder: v0.1.0 or 765cb48
+      placeholder: v0.1.1 or 97c8f47
     validations:
       required: true
   - type: textarea

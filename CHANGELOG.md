@@ -6,17 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-25
+
 ### Added
 
 - Citation metadata in `CITATION.cff`, a bilingual support guide, repository code owners, CodeQL analysis and pull-request dependency review.
 
 ### Changed
 
+- Upgraded Vite to 8.3.8, TypeScript to 7.0.2 and `@vitejs/plugin-react` to 6.3.0, while keeping `@types/node` aligned with the minimum supported Node.js 24 runtime.
 - Migrated the development servers from the deprecated Vite HMR options to `server.ws`.
 
 ### Fixed
 
 - Restricted HTTP failures to explicitly public messages, removed unused imports and redundant conditionals, and pinned workflow actions to immutable commits after the first CodeQL scan.
+
+### Validation
+
+- `pnpm check` passes type checking, 17 core tests and the production frontend build.
+- 69 Chromium browser cases pass.
+- macOS, Windows and Linux source checks pass, including `cargo check --locked`.
+- CodeQL reports no open alerts after the security fixes.
 
 ## [0.1.0] - 2026-11-25
 
@@ -50,5 +60,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - macOS, Windows and Linux source checks pass, including `cargo check --locked`.
 - Windows and Linux native interactive acceptance remains unverified; no installers are attached.
 
-[Unreleased]: https://github.com/TunneldeDev/TunneldeDebugger/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/TunneldeDev/TunneldeDebugger/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/TunneldeDev/TunneldeDebugger/releases/tag/v0.1.1
 [0.1.0]: https://github.com/TunneldeDev/TunneldeDebugger/releases/tag/v0.1.0

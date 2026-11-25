@@ -69,8 +69,8 @@ pnpm acceptance:native 'native:native-service#files'
 
 如果 TunneldeDebugger 对你的文档、研究或发布工作有帮助，可按仓库中的 [CITATION.cff](CITATION.cff) 引用：
 
-> TunneldeDev. (2026). *TunneldeDebugger* (Version 0.1.0) [Computer software]. https://github.com/TunneldeDev/TunneldeDebugger
+> TunneldeDev. (2026). *TunneldeDebugger* (Version 0.1.1) [Computer software]. https://github.com/TunneldeDev/TunneldeDebugger
 
 GitHub 会根据该文件在仓库页面提供 “Cite this repository” 入口。
 
-`v0.1.0` 是仅提供源码的 Release，不附带安装包。Windows/Linux 原生功能保留源码适配，尚未实际验收。许可证 GPL-3.0-only。
+`v0.1.1` 是仅提供源码的 Release，不附带安装包。Windows/Linux 原生功能保留源码适配，尚未实际验收。许可证 GPL-3.0-only。

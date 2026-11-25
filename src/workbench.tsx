@@ -472,7 +472,7 @@ export function Workbench() {
           <strong>
             Tunnelde<span>Debugger</span>
           </strong>
-          <span className="version">0.1</span>
+          <span className="version">0.1.1</span>
         </div>
         <div className="workspace-path">
           本地工作区<span className="divider">/</span>

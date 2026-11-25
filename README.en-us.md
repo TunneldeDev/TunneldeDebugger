@@ -69,8 +69,8 @@ Start with the documentation index in [SUPPORT.md](SUPPORT.md). Ask usage questi
 
 If TunneldeDebugger supports your documentation, research or published work, cite it using the metadata in [CITATION.cff](CITATION.cff):
 
-> TunneldeDev. (2026). *TunneldeDebugger* (Version 0.1.0) [Computer software]. https://github.com/TunneldeDev/TunneldeDebugger
+> TunneldeDev. (2026). *TunneldeDebugger* (Version 0.1.1) [Computer software]. https://github.com/TunneldeDev/TunneldeDebugger
 
 GitHub exposes the metadata through the repository's “Cite this repository” action.
 
-`v0.1.0` is a source-only release with no installers attached. Windows/Linux native source adaptation is retained but has not been validated on those systems. Licensed GPL-3.0-only.
+`v0.1.1` is a source-only release with no installers attached. Windows/Linux native source adaptation is retained but has not been validated on those systems. Licensed GPL-3.0-only.
