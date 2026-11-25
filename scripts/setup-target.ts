@@ -31,15 +31,17 @@ if (exists) {
     target,
     revision,
   ]);
-  await command(target, "git", [
-    "apply",
-    "--check",
-    join(root, "integration/tunnelde.patch"),
+  // The pinned upstream revision already includes the development adapter.
+  await stat(join(target, "src/debugger/index.tsx"));
+  const version = await runProcess("pnpm", ["--version"], { cwd: target });
+  if (version.code !== 0) throw new Error("Unable to read pnpm version");
+  await command(target, "pnpm", [
+    "install",
+    "--frozen-lockfile",
+    // pnpm 12 no longer reads upstream's package.json build allowlist.
+    ...(parseInt(version.output.trim(), 10) >= 12
+      ? ['--config.allowBuilds={"esbuild":true}']
+      : []),
   ]);
-  await command(target, "git", [
-    "apply",
-    join(root, "integration/tunnelde.patch"),
-  ]);
-  await command(target, "pnpm", ["install", "--frozen-lockfile"]);
 }
 console.log(`Run pnpm dev --target ${target}`);

@@ -19,7 +19,7 @@ pnpm dev
 pnpm desktop
 ```
 
-Open <http://127.0.0.1:4760>. `setup:target` creates a separate worktree next to the main repository and applies the included adapter patch without changing files in the original checkout. The patch is pinned to the remote dev revision in `integration/base.json`; rebase and validate the patch when updating that revision.
+Open <http://127.0.0.1:4760>. `setup:target` creates a separate worktree next to the main repository at the remote dev revision pinned in `integration/base.json`, which already includes the development adapter and settings group scrolling fix, without changing files in the original checkout. Existing targets are reused without updating or overwriting their changes; choose a new target directory to upgrade. `integration/tunnelde.patch` is retained only as a historical patch for the early baseline and must not be applied to the current baseline.
 
 Use `pnpm dev --target /absolute/checkout --data /absolute/local-data --port 4760` to override paths. Environment variables are `TUNNELDE_TARGET` and `TUNNELDE_DEBUGGER_DATA`. Four consecutive ports serve the workbench, iframe renderer, native frontend and HMR. The desktop wrapper currently uses the default port.
 
@@ -45,8 +45,8 @@ pnpm acceptance:native     # 43 native mock + 5 real-service tasks; macOS requir
 pnpm acceptance:native 'native:native-service#files'
 ```
 
-Read the [guide and architecture](docs/en-us/guide.md), [coverage and validation notes](docs/en-us/validation.md) and [target adapter patch](integration/tunnelde.patch). Native tasks require an interactive desktop session. Capture failures retain their reason and never create successful screenshot evidence.
+Read the [guide and architecture](docs/en-us/guide.md), [coverage and validation notes](docs/en-us/validation.md) and [upstream adapter documentation](https://github.com/TunneldeDev/Tunnelde/blob/dev/docs/en-us/development/debugger.md). Native tasks require an interactive desktop session. Capture failures retain their reason and never create successful screenshot evidence.
 
 Local data lives in the ignored `.tunnelde-debugger/` directory: runs, acceptance records, instance profiles, logs and artifacts. Stop instances and back up reports before deleting it. Unfinished tasks become interrupted after a service restart.
 
-This version runs from source; no installers or remote repository publication are included. Windows/Linux native source adaptation is retained but has not been validated on those systems. Licensed GPL-3.0-only.
+This version runs from source; no installers or Releases are provided. Windows/Linux native source adaptation is retained but has not been validated on those systems. Licensed GPL-3.0-only.

@@ -31,6 +31,8 @@ Local run IDs: native batch `9d523279-36cb-4660-8786-6a9416f856b9` (48 tasks), f
 - Source boundaries isolate everyday and debug data/plugin/credential namespaces; no reads/writes against the user's everyday application data were used for acceptance.
 - macOS, Windows and Linux source checks and desktop host compilation passed the [platform CI matrix](https://github.com/TunneldeDev/TunneldeDebugger/actions/runs/45490467265). Windows/Linux actual window interaction and human visual acceptance remain unverified. No installers or Releases are included.
 
+Window offset fix: settings group navigation now scrolls only its content pane, avoiding application-shell scrolling caused by `scrollIntoView`. Upstream `pnpm check` passed 390 files / 3,160 tests; Debugger `pnpm check`, 69 Chromium regressions and 6 related WebKit regressions passed, covering fit, 50%/100%/125% zoom, category changes, inspector toggles, canvas movement and scrolled capture. Removing the fix makes the new alignment test detect the shell offset and fail. New targets use the fixed upstream revision in `integration/base.json`; native window manual acceptance was not repeated in this round.
+
 ## Retention
 
 The index retains the latest 200 runs; the UI loads the latest 100. All case results persist. The console shows up to 4,000 recent events, while complete JSONL event journals remain in `logs/` and can be downloaded from the console. Screenshots live in `artifacts/`; manual conclusions live in `acceptance.json`. Older runs without a full journal report it unavailable. JSON exports reference local artifacts; include the relevant files when sharing.
