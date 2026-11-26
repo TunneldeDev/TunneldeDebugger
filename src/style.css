@@ -89,6 +89,28 @@ a {
   gap: 38px;
   background: var(--td-panel);
 }
+.export-notice {
+  flex: none;
+  min-width: 0;
+  max-height: 40%;
+  overflow: auto;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--td-border);
+  background: var(--td-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.export-summary, .export-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.export-summary span { color: var(--td-muted); }
+.export-notice input { width: 100%; min-width: 0; }
+.export-actions a { text-decoration: none; }
+.export-notice p { margin: 0; color: var(--td-muted); }
 .brand {
   display: flex;
   align-items: center;

@@ -29,6 +29,7 @@ import { Scheduler } from "./scheduler";
 import { NativeRunner } from "./native-runner";
 import { NativeManager } from "./native";
 import { PublicError } from "./public-error";
+import { ReportExporter } from "./report";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const argument = (name: string) => {
   const index = process.argv.indexOf(name);
@@ -98,6 +99,7 @@ const artifactsStore = new JsonStore<Record<string, ArtifactEvidence>>(
   {},
 );
 const artifacts = await artifactsStore.read();
+const reports = new ReportExporter(data);
 const testTree = new Map<RunnerKind, TestItem[]>();
 const discovering = new Set<RunnerKind>();
 const browserReady = new Map<
@@ -233,7 +235,9 @@ const server = createHttpServer(async (request, response) => {
   try {
     checkedRequest(request);
     if (reconfiguring && request.method !== "GET")
-      throw new PublicError("正在应用项目配置 / Project reconfiguration in progress");
+      throw new PublicError(
+        "正在应用项目配置 / Project reconfiguration in progress",
+      );
     const readOnly =
       [
         "/api/events",
@@ -245,6 +249,7 @@ const server = createHttpServer(async (request, response) => {
         "/api/report",
         "/api/acceptance/trash",
       ].includes(url.pathname) ||
+      /^\/api\/reports\/[^/]+\.zip$/.test(url.pathname) ||
       url.pathname.startsWith("/artifacts/") ||
       /^\/api\/runs\/[^/]+\/events$/.test(url.pathname);
     if (request.method !== (readOnly ? "GET" : "POST")) {
@@ -418,7 +423,8 @@ const server = createHttpServer(async (request, response) => {
       const kind = input.runner as RunnerKind;
       if (!["vitest", "node", "rust", "playwright", "native"].includes(kind))
         throw new PublicError("Unknown test runner");
-      if (discovering.has(kind)) throw new PublicError("Discovery already running");
+      if (discovering.has(kind))
+        throw new PublicError("Discovery already running");
       discovering.add(kind);
       try {
         const items = await (
@@ -652,7 +658,9 @@ const server = createHttpServer(async (request, response) => {
         bytes.readUInt32BE(16) > 8192 ||
         bytes.readUInt32BE(20) > 8192
       )
-        throw new PublicError("图片无效或超过 8 MiB / Invalid image or over 8 MiB");
+        throw new PublicError(
+          "图片无效或超过 8 MiB / Invalid image or over 8 MiB",
+        );
       const name = `evidence-${randomUUID()}.png`;
       const browserEvidence = browserReady.get(String(input.ticket));
       const source =
@@ -684,6 +692,48 @@ const server = createHttpServer(async (request, response) => {
         runs: scheduler.runs,
         native: native.state,
       });
+      return;
+    }
+    if (url.pathname === "/api/report/export") {
+      await body(request);
+      // Records retain their original source identity even if the project moved.
+      const source = await sourceIdentity(target).catch(() => ({
+        path: target,
+        revision: "unavailable",
+        dirtyFingerprint: "",
+        protocol: 1,
+      }));
+      json(
+        response,
+        await reports.create({
+          version: 1,
+          generatedAt: new Date().toISOString(),
+          source,
+          coverage: scenarios,
+          records: acceptance.list(),
+          runs: scheduler.runs,
+          native: native.state,
+        }),
+      );
+      return;
+    }
+    if (url.pathname === "/api/report/reveal") {
+      const input = await body(request);
+      await reports.reveal(String(input.filename));
+      json(response, { ok: true });
+      return;
+    }
+    if (/^\/api\/reports\/[^/]+\.zip$/.test(url.pathname)) {
+      const filename = url.pathname.split("/").at(-1)!;
+      const bytes = await reports.read(filename);
+      response.writeHead(200, {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": bytes.length,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      response.end(bytes);
       return;
     }
     if (url.pathname.startsWith("/api/native/") && scheduler.nativeBusy)

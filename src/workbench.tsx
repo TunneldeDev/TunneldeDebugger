@@ -45,6 +45,8 @@ import {
 import { localize } from "./i18n";
 import { api } from "./api";
 import { captureFramePixels } from "./screen-capture";
+import type { ExportedReport } from "../shared/report";
+import { isTauri } from "@tauri-apps/api/core";
 import { AcceptancePanel } from "./acceptance-panel";
 import {
   DEFAULT_PARAMETERS,
@@ -136,6 +138,9 @@ export function Workbench() {
   const [ready, setReady] = useState(false);
   const [diagnostics, setDiagnostics] = useState<string[]>([]);
   const [error, setError] = useState<string>();
+  const [exported, setExported] = useState<ExportedReport>();
+  const [exporting, setExporting] = useState(false);
+  const exportPending = useRef(false);
   const [state, setState] = useState<State>({
     runs: [],
     records: [],
@@ -398,20 +403,34 @@ export function Workbench() {
     if (takeScreenshot) setCaptureRequest((previous) => previous + 1);
     else showAcceptance();
   };
-  const exportReport = () =>
-    perform("export", async () => {
-      const report = await api("report");
-      const url = URL.createObjectURL(
-        new Blob([JSON.stringify(report, null, 2)], {
-          type: "application/json",
-        }),
+  const exportReport = async () => {
+    if (exportPending.current) return;
+    exportPending.current = true;
+    setExporting(true);
+    setError(undefined);
+    setExported(undefined);
+    try {
+      const report = await api<ExportedReport>("report/export", {});
+      setExported(report);
+      // WKWebView does not reliably handle anchor downloads. Its copy is already
+      // durably saved by the service; offer the real path and a reveal action.
+      if (!isTauri()) {
+        const link = document.createElement("a");
+        link.href = report.downloadUrl;
+        link.download = report.filename;
+        document.body.append(link);
+        link.click();
+        link.remove();
+      }
+    } catch (cause) {
+      setError(
+        `${uiLocale === "zh-CN" ? "导出报告失败" : "Report export failed"}: ${cause instanceof Error ? cause.message : String(cause)}`,
       );
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `tunnelde-acceptance-${Date.now()}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-    });
+    } finally {
+      exportPending.current = false;
+      setExporting(false);
+    }
+  };
   const patch = (value: Partial<ScenarioParameters>) =>
     setParameters((previous) => ({ ...previous, ...value }));
   return localize(
@@ -456,11 +475,12 @@ export function Workbench() {
         <button
           className="text-button"
           onClick={exportReport}
+          disabled={exporting}
           aria-label="导出报告"
           title="导出报告"
         >
           <Download size={14} />
-          <span>导出报告</span>
+          <span>{exporting ? "正在导出…" : "导出报告"}</span>
         </button>
       </header>
       <div className="layout">
@@ -705,6 +725,60 @@ export function Workbench() {
               <span>{error}</span>
               <button onClick={() => setError(undefined)}>关闭</button>
             </div>
+          )}
+          {exported && (
+            <section className="export-notice" aria-label="报告导出结果">
+              <div className="export-summary" role="status">
+                <strong>报告已保存到本地</strong>
+                <span>
+                  {exported.recordCount}{" "}
+                  {uiLocale === "zh-CN" ? "条记录" : "records"} ·{" "}
+                  {exported.screenshotCount}{" "}
+                  {uiLocale === "zh-CN" ? "张截图" : "screenshots"}
+                </span>
+              </div>
+              <input
+                aria-label="导出报告路径"
+                readOnly
+                value={exported.path}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              <div className="export-actions">
+                <button
+                  className="action"
+                  onClick={() =>
+                    void perform("reveal-report", () =>
+                      api("report/reveal", { filename: exported.filename }),
+                    )
+                  }
+                >
+                  打开导出目录
+                </button>
+                {!isTauri() && (
+                  <a
+                    className="action"
+                    href={exported.downloadUrl}
+                    download={exported.filename}
+                  >
+                    下载报告
+                  </a>
+                )}
+                <button
+                  className="action"
+                  aria-label="关闭导出提示"
+                  onClick={() => setExported(undefined)}
+                >
+                  关闭
+                </button>
+              </div>
+              {exported.warnings.length > 0 && (
+                <p role="alert">
+                  {uiLocale === "zh-CN"
+                    ? "部分附件未能打包，详情已写入报告"
+                    : "Some attachments could not be bundled; see report warnings"}
+                </p>
+              )}
+            </section>
           )}
           {config?.targetError && (
             <div className="error-banner" role="alert">
