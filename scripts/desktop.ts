@@ -81,7 +81,7 @@ try {
   }
   await mkdir(data, { recursive: true });
   const config = join(data, `desktop-${port}.json`);
-  const csp = `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' ${url} ws://127.0.0.1:${port + 3}; frame-src http://127.0.0.1:${port + 1}; img-src 'self' data: blob: ${url}; style-src 'self' 'unsafe-inline'`;
+  const csp = `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' ${url} ws://127.0.0.1:${port + 3}; frame-src http://127.0.0.1:${port + 1}; img-src 'self' data: blob: ${url}; media-src 'self' blob:; style-src 'self' 'unsafe-inline'`;
   await writeFile(
     config,
     JSON.stringify({

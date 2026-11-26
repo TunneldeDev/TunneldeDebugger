@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { type Page, type TestInfo } from "@playwright/test";
+import { test, expect } from "./capture-fixture";
 
 test("capture preserves the visible scrolled settings and leaves the live scene unchanged", async ({
   page,
@@ -34,9 +35,9 @@ test("capture preserves the visible scrolled settings and leaves the live scene 
   const pixel = await capturePixel(page, position, testInfo);
   await expect(page.locator("iframe")).toHaveAttribute("src", frameSrc!);
   expect(await scroller.evaluate((node) => node.scrollTop)).toBe(position.top);
-  // WebKit can round a CSS gradient channel by one during SVG rasterization.
+  // Display-media video can round color channels during pixel transport.
   [251, 17, 211, 255].forEach((value, channel) =>
-    expect(Math.abs(pixel[channel]! - value)).toBeLessThanOrEqual(2),
+    expect(Math.abs(pixel[channel]! - value)).toBeLessThanOrEqual(5),
   );
 });
 
@@ -101,9 +102,9 @@ test("capture preserves both axes of the production editor scroller", async ({
       left: node.scrollLeft,
     })),
   ).toEqual({ top: position.top, left: position.left });
-  // WebKit can round a CSS gradient channel by one during SVG rasterization.
+  // Display-media video can round color channels during pixel transport.
   [251, 17, 211, 255].forEach((value, channel) =>
-    expect(Math.abs(pixel[channel]! - value)).toBeLessThanOrEqual(2),
+    expect(Math.abs(pixel[channel]! - value)).toBeLessThanOrEqual(5),
   );
 });
 
@@ -112,6 +113,17 @@ async function capturePixel(
   point: { x: number; y: number },
   info: TestInfo,
 ) {
+  const capturePoint = await page.locator("iframe").evaluate((frame, point) => {
+    const rect = frame.getBoundingClientRect();
+    return {
+      x: Math.floor(
+        (point.x * rect.width) / (frame as HTMLIFrameElement).clientWidth,
+      ),
+      y: Math.floor(
+        (point.y * rect.height) / (frame as HTMLIFrameElement).clientHeight,
+      ),
+    };
+  }, point);
   await page.getByRole("button", { name: "截取当前界面", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("截图已加入草稿", {
     timeout: 30000,
@@ -138,6 +150,9 @@ async function capturePixel(
       context.drawImage(image, 0, 0);
       return [...context.getImageData(x, y, 1, 1).data];
     },
-    { data: `data:image/png;base64,${bytes.toString("base64")}`, ...point },
+    {
+      data: `data:image/png;base64,${bytes.toString("base64")}`,
+      ...capturePoint,
+    },
   );
 }

@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { localize } from "./i18n";
 import { api } from "./api";
+import { captureFramePixels } from "./screen-capture";
 import { AcceptancePanel } from "./acceptance-panel";
 import {
   DEFAULT_PARAMETERS,
@@ -173,7 +174,8 @@ export function Workbench() {
   const [catalogOpen, setCatalogOpen] = useState<boolean>();
   const [inspectorOpen, setInspectorOpen] = useState<boolean>();
   const inspectorVisible = inspectorOpen ?? false;
-  const catalogOverlay = windowWidth < 850 || (inspectorVisible && windowWidth < 1180);
+  const catalogOverlay =
+    windowWidth < 850 || (inspectorVisible && windowWidth < 1180);
   const catalogVisible = catalogOpen ?? !catalogOverlay;
   // Keep the renderer's layout viewport intact; only scale its presentation.
   const frameWidth = parameters.width + 2;
@@ -371,56 +373,14 @@ export function Workbench() {
     const element = frame.current;
     if (!element?.contentWindow || !config)
       throw new Error("场景尚未挂载 / Scene not mounted");
-    const requestId = crypto.randomUUID();
-    const image = await new Promise<string>((resolve, reject) => {
-      const cleanup = () => {
-        clearTimeout(timer);
-        clearInterval(watch);
-        window.removeEventListener("message", receive);
-      };
-      const receive = (event: MessageEvent<FrameMessage>) => {
-        const message = event.data;
-        if (
-          event.source !== element.contentWindow ||
-          event.origin !== config.rendererOrigin ||
-          message?.version !== 1 ||
-          message.session !== session.current ||
-          message.generation !== generation ||
-          message.type !== "captured" ||
-          message.requestId !== requestId
-        )
-          return;
-        cleanup();
-        if (message.error || !message.image)
-          reject(new Error(message.error ?? "截图失败 / Capture failed"));
-        else resolve(message.image);
-      };
-      const timer = setTimeout(() => {
-        cleanup();
-        reject(
-          new Error(
-            "截图超时，可上传或粘贴图片 / Capture timed out; attach an image instead",
-          ),
-        );
-      }, 20000);
-      const watch = setInterval(() => {
-        if (frame.current !== element || !element.isConnected) {
-          cleanup();
-          reject(new Error("场景已切换 / Scene changed during capture"));
-        }
-      }, 100);
-      window.addEventListener("message", receive);
-      element.contentWindow!.postMessage(
-        {
-          version: 1,
-          session: session.current,
-          generation,
-          type: "capture",
-          requestId,
-        },
-        config.rendererOrigin,
-      );
-    });
+    const frameSrc = element.src;
+    const image = await captureFramePixels(element);
+    if (
+      frame.current !== element ||
+      !element.isConnected ||
+      element.src !== frameSrc
+    )
+      throw new Error("场景已切换 / Scene changed during capture");
     const result = await api<{ artifact: string }>("attachments", {
       scenarioId: selected,
       target: "browser",
@@ -430,10 +390,13 @@ export function Workbench() {
     });
     return result.artifact;
   };
-  const openAcceptance = (takeScreenshot = false) => {
+  const showAcceptance = () => {
     setTool("acceptance");
     setInspectorOpen(true);
+  };
+  const openAcceptance = (takeScreenshot = false) => {
     if (takeScreenshot) setCaptureRequest((previous) => previous + 1);
+    else showAcceptance();
   };
   const exportReport = () =>
     perform("export", async () => {
@@ -1292,11 +1255,7 @@ export function Workbench() {
             </>
           )}
         </main>
-        <aside
-          id="inspector"
-          className="inspector"
-          hidden={!inspectorVisible}
-        >
+        <aside id="inspector" className="inspector" hidden={!inspectorVisible}>
           <div className="inspector-heading">
             <span>检查器</span>
             <button
@@ -1517,10 +1476,9 @@ export function Workbench() {
                   records={state.records}
                   captureRequest={captureRequest}
                   capture={captureCurrent}
+                  onCaptureFinished={showAcceptance}
                   canCapture={
-                    section === "native"
-                      ? nativeReady
-                      : !config.targetError
+                    section === "native" ? nativeReady : !config.targetError
                   }
                   canPass={section === "native" ? nativeReady : ready}
                   locale={uiLocale}

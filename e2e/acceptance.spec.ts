@@ -1,5 +1,5 @@
 import { selectOption } from "./helpers";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./capture-fixture";
 import { DEFAULT_PARAMETERS } from "../shared/protocol";
 const saved = new Map<string, string>();
 const responses: Promise<void>[] = [];
@@ -71,8 +71,9 @@ test("live capture, annotations, durable save, editing and reversible deletion",
   const image = await page.request.get(original!);
   expect(image.ok()).toBe(true);
   const bytes = await image.body();
-  expect(bytes.readUInt32BE(16)).toBe(1280);
-  expect(bytes.readUInt32BE(20)).toBe(800);
+  const frameBox = (await page.locator("iframe").boundingBox())!;
+  expect(Math.abs(bytes.readUInt32BE(16) - frameBox.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(bytes.readUInt32BE(20) - frameBox.height)).toBeLessThanOrEqual(2);
   await testInfo.attach("live-capture", {
     body: bytes,
     contentType: "image/png",

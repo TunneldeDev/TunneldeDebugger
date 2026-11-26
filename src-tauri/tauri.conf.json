@@ -20,9 +20,9 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4760; frame-src http://127.0.0.1:4761; img-src 'self' data: http://127.0.0.1:4760; style-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4760; frame-src http://127.0.0.1:4761; img-src 'self' data: blob: http://127.0.0.1:4760; media-src 'self' blob:; style-src 'self' 'unsafe-inline'",
       "capabilities": [],
-      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://127.0.0.1:4760 ws://127.0.0.1:4763; frame-src http://127.0.0.1:4761; img-src 'self' data: http://127.0.0.1:4760; style-src 'self' 'unsafe-inline'"
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://127.0.0.1:4760 ws://127.0.0.1:4763; frame-src http://127.0.0.1:4761; img-src 'self' data: blob: http://127.0.0.1:4760; media-src 'self' blob:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
