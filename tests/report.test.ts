@@ -66,7 +66,7 @@ test("report export persists portable records and deduplicated images; deleted r
     assert.equal(result.screenshotCount, 1);
     assert.deepEqual(result.warnings, []);
     assert.equal(await exporter.path(result.filename), result.path);
-    const files = unzipSync(await readFile(result.path));
+    const files = unzipSync(await exporter.read(result.filename));
     assert.deepEqual(Object.keys(files).sort(), [
       "artifacts/test.png",
       "report.json",
@@ -93,6 +93,10 @@ test("report export persists portable records and deduplicated images; deleted r
       await new ReportExporter(data).path(result.filename),
       result.path,
     );
+    assert.deepEqual(
+      await new ReportExporter(data).read(result.filename),
+      await readFile(result.path),
+    );
     assert.notEqual((await exporter.create(report)).filename, result.filename);
   } finally {
     await rm(data, { recursive: true, force: true });
@@ -117,6 +121,7 @@ test("missing and unsafe attachments produce visible warnings without reading ou
     );
     assert.match(strFromU8(files["report.md"]!), /missing.png/);
     await assert.rejects(exporter.path("../report.zip"), /not found/);
+    await assert.rejects(exporter.read("../report.zip"), /not found/);
     await assert.rejects(
       exporter.path(
         result.filename.replace(
@@ -138,6 +143,10 @@ test("missing and unsafe attachments produce visible warnings without reading ou
       });
       assert.equal(linked.screenshotCount, 0);
       assert.equal(linked.warnings.length, 1);
+      const linkName =
+        "tunnelde-acceptance-20000101T000000000Z-00000000-0000-0000-0000-000000000000.zip";
+      await symlink(join(data, "private.png"), join(data, "exports", linkName));
+      await assert.rejects(exporter.read(linkName), /cannot be read/);
     }
   } finally {
     await rm(data, { recursive: true, force: true });

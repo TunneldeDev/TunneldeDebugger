@@ -180,6 +180,28 @@ export class ReportExporter {
     return path;
   }
 
+  async read(filename: string) {
+    if (!validName.test(filename))
+      throw new PublicError("报告不存在 / Report not found", 404);
+    let handle;
+    try {
+      handle = await open(
+        join(this.data, "exports", filename),
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      );
+      // Check and read the same open file, without a path-based stat/read race.
+      const info = await handle.stat();
+      if (!info.isFile() || info.size > MAX_BYTES * 2)
+        throw new PublicError("报告文件无效 / Invalid report file");
+      return await handle.readFile();
+    } catch (error) {
+      if (error instanceof PublicError) throw error;
+      throw new PublicError("报告无法读取 / Report cannot be read", 404);
+    } finally {
+      await handle?.close();
+    }
+  }
+
   async reveal(filename: string) {
     const path = await this.path(filename);
     try {

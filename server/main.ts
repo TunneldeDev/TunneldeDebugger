@@ -725,15 +725,15 @@ const server = createHttpServer(async (request, response) => {
     }
     if (/^\/api\/reports\/[^/]+\.zip$/.test(url.pathname)) {
       const filename = url.pathname.split("/").at(-1)!;
-      const path = await reports.path(filename);
+      const bytes = await reports.read(filename);
       response.writeHead(200, {
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": (await stat(path)).size,
+        "Content-Length": bytes.length,
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
       });
-      response.end(await readFile(path));
+      response.end(bytes);
       return;
     }
     if (url.pathname.startsWith("/api/native/") && scheduler.nativeBusy)

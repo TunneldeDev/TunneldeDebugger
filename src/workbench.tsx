@@ -408,6 +408,7 @@ export function Workbench() {
     exportPending.current = true;
     setExporting(true);
     setError(undefined);
+    setExported(undefined);
     try {
       const report = await api<ExportedReport>("report/export", {});
       setExported(report);
