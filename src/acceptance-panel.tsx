@@ -77,6 +77,7 @@ export function AcceptancePanel({
   records,
   captureRequest,
   capture,
+  onCaptureFinished,
   canCapture,
   canPass,
   locale,
@@ -91,6 +92,7 @@ export function AcceptancePanel({
   records: AcceptanceRecord[];
   captureRequest: number;
   capture: () => Promise<string>;
+  onCaptureFinished: () => void;
   canCapture: boolean;
   canPass: boolean;
   locale: "zh-CN" | "en-US";
@@ -197,15 +199,19 @@ export function AcceptancePanel({
   };
   const takeCapture = () =>
     work(async () => {
-      if (!canCapture || !sameContext)
-        throw new Error(
-          "当前场景无法截图，可上传或粘贴图片 / Cannot capture this scene; attach an image instead",
-        );
-      if (draft.screenshots.length >= 20)
-        throw new Error("最多附加 20 张图片 / Maximum 20 images");
-      const artifact = await capture();
-      persistAttachment(artifact);
-      if (mounted.current) setMessage("截图已加入草稿，请保存记录");
+      try {
+        if (!canCapture || !sameContext)
+          throw new Error(
+            "当前场景无法截图，可上传或粘贴图片 / Cannot capture this scene; attach an image instead",
+          );
+        if (draft.screenshots.length >= 20)
+          throw new Error("最多附加 20 张图片 / Maximum 20 images");
+        const artifact = await capture();
+        persistAttachment(artifact);
+        if (mounted.current) setMessage("截图已加入草稿，请保存记录");
+      } finally {
+        if (mounted.current) onCaptureFinished();
+      }
     });
   useEffect(() => {
     if (captureRequest !== requestSeen.current) {
@@ -472,7 +478,7 @@ export function AcceptancePanel({
           title={
             !canCapture || !sameContext
               ? "无法截图时可上传或粘贴图片"
-              : "截取当前操作状态"
+              : "截取可见画面；浏览器中请选择此标签页"
           }
           onClick={() => void takeCapture()}
         >

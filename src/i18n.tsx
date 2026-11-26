@@ -169,6 +169,7 @@ export const english: Record<string, string> = {
   场景就绪: "Scene ready",
   加载场景: "Loading scene",
   截图: "Capture",
+  "截取可见画面；浏览器中请选择此标签页": "Capture the visible view; select this tab in the browser picker",
   关闭: "Close",
   运行记录: "Run history",
   测试输出: "Test output",

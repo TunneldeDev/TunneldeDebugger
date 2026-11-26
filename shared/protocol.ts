@@ -150,8 +150,6 @@ export type FrameMessage = {
   | { type: "ready"; scenarioId: string }
   | { type: "error"; message: string }
   | { type: "diagnostic"; message: string }
-  | { type: "capture"; requestId: string }
-  | { type: "captured"; requestId: string; image?: string; error?: string }
   | { type: "snapshot" }
   | { type: "state"; snapshot: unknown }
 );

@@ -1,9 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod capture;
+
 use tauri::{LogicalPosition, LogicalSize, Manager};
 
 fn main() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![capture::capture_workbench])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 // Fit the complete decorated window inside this monitor's work area,
